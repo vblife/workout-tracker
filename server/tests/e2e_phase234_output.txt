@@ -1,0 +1,44 @@
+workout-tracker: stdio mode, db=/tmp/tmp8q7vneko/e2e.db
+server: workout-tracker 0.2.0
+tools (17): ['get_context', 'update_settings', 'resolve_exercise', 'add_alias', 'add_exercise', 'log_sets', 'list_recent', 'delete_set', 'query_stats', 'hiit_timer', 'log_hiit', 'log_activity', 'delete_session', 'suggest_next', 'daily_plan_context', 'report', 'show_progress']
+UI tools: {'hiit_timer': 'ui://workout/hiit.html', 'report': 'ui://workout/report.html', 'show_progress': 'ui://workout/progress.html'}
+resource ui://workout/hiit.html text/html;profile=mcp-app 6822 chars
+resource ui://workout/progress.html text/html;profile=mcp-app 7460 chars
+resource ui://workout/report.html text/html;profile=mcp-app 7460 chars
+
+### log_activity hike  isError=False
+{"status": "logged", "session_id": 4, "type": "hike", "activity": "hike", "duration_min": 150, "distance": 6.5, "distance_unit": "mi", "elevation_gain": 1800, "elevation_unit": "ft", "performed_at_local": "2026-10-04T09:00:00-07:00"}
+
+### suggest_next 卧推  isError=False
+{"exercise": "Barbell Bench Press", "name_zh": "杠铃卧推", "unit": "lb", "rep_range": "8-12", "equipment": "barbell", "equipment_status": "unknown", "equipment_note": "Equipment not set; this needs barbell. Ask Charles (update_settings equipment).", "last_session_local": "2026-10-06", "days_since": 5, "last_sets": "12x120.0, 12x120.0, 12x120.0", "status": "increase_weight", "sets": 3, "reps": 8, "weight": 125.0, "rationa
+
+### suggest_next squat  isError=False
+{"exercise": "Back Squat", "name_zh": "杠铃深蹲", "unit": "lb", "rep_range": "8-12", "equipment": "barbell", "equipment_status": "unknown", "equipment_note": "Equipment not set; this needs barbell. Ask Charles (update_settings equipment).", "last_session_local": "2026-10-06", "days_since": 5, "last_sets": "8x100.0, 8x100.0, 8x100.0", "status": "add_reps", "sets": 3, "reps": 9, "weight": 100.0, "rationale": "Last 8x100.0,
+
+### suggest_next lat pulldown (no history, equipment unknown)  isError=False
+{"exercise": "Lat Pulldown", "name_zh": "高位下拉", "unit": "lb", "rep_range": "8-12", "equipment": "cable", "equipment_status": "unknown", "equipment_note": "Equipment not set; this needs cable. Ask Charles (update_settings equipment).", "status": "no_history", "sets": 3, "reps": 8, "weight": null, "rationale": "No history. Start with 3x8 at a weight you could lift ~14 times; log it and next time I'll progress from ther
+
+### daily_plan_context: focus= hike | Weekend and no hike yet this week → hike. | week= {'days_trained': ['2026-10-06'], 'target': 5, 'still_needed': 4, 'days_left_incl_today': 1, 'trained_today': False, 'cardio_minutes': 0, 'cardio_minutes_last_week': 150, 'cardio_cap_10pct': 165, 'hikes': 0} | equipment_known= False | candidates= []
+
+### hiit_timer  isError=False
+HIIT timer ready (id 1): 8 rounds × Burpee 20s, rest 10s; total 4m50s. Press Start.
+Open on phone / no-UI clients: https://cyzhao.github.io/workout-ui/hiit.html#eyJoaWl0X2lkIjoxLCJuYW1lIjoiVGFiYXRhIiwicm91bmRzIjo4LCJzZWdtZW50cyI6W3sia2luZCI6IndvcmsiLCJzZWNvbmR
+result _meta: {'ui': {'resourceUri': 'ui://workout/hiit.html'}}
+
+### report week: label=2026-10-05 – 2026-10-11 days=1 sets=7 volume=6720.0lb cardio=0m hikes=0 PRs=0 highlights=['1 training days (target 5/week).'] url_len=2155
+
+### report month: label=2026-10 days=2 sets=7 volume=6720.0lb cardio=150m hikes=1 PRs=0 highlights=['2 training days (target 5/week).', '1 hike(s), 6.5 mi, +1800 ft.'] url_len=2270
+
+### report quarter: label=2026 Q4 days=2 sets=7 volume=6720.0lb cardio=150m hikes=1 PRs=0 highlights=['2 training days (target 5/week).', '1 hike(s), 6.5 mi, +1800 ft.'] url_len=2272
+
+### report year: label=2026 days=4 sets=21 volume=19980.0lb cardio=150m hikes=1 PRs=3 highlights=['4 training days (target 5/week).', '3 PR(s): Barbell Bench Press 115.0×12, Back Squat 100.0×8, Barbell Bench Press 120.0×12', '1 hike(s), 6.5 mi, +1800 ft.'] url_len=2855
+
+### report all: label=All time days=4 sets=21 volume=19980.0lb cardio=150m hikes=1 PRs=3 highlights=['3 PR(s): Barbell Bench Press 115.0×12, Back Squat 100.0×8, Barbell Bench Press 120.0×12', '1 hike(s), 6.5 mi, +1800 ft.'] url_len=2475
+
+### show_progress bench e1rm: [('2026-09-21', 161.0), ('2026-09-28', 168.0), ('2026-10-05', 168.0)] {'first': 161.0, 'last': 168.0, 'best': 168.0, 'change_pct': 4.3}
+### show_progress overall days: [{'period': '2026-09-21', 'value': 1}, {'period': '2026-09-28', 'value': 2}, {'period': '2026-10-05', 'value': 1}]
+
+### bad report period  isError=True
+Error: period must be week|month|quarter|year|all
+
+E2E OK
