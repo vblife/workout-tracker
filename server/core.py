@@ -4,6 +4,7 @@ from datetime import datetime,timedelta,timezone
 from zoneinfo import ZoneInfo
 from normalize import norm,fuzzy
 import db as dbm
+import workouts,calories
 
 LB=0.45359237
 TZ=ZoneInfo("America/Los_Angeles")
@@ -19,7 +20,7 @@ def _parse_time(s):
   if not s: return datetime.now(timezone.utc).replace(microsecond=0)
   d=datetime.fromisoformat(s.replace("Z","+00:00"))
   if d.tzinfo is None: d=d.replace(tzinfo=TZ)   # naive = Charles' local time
-  return d.astimezone(timezone.utc).replace(microsecond=0)
+  return d.astimezone(timezone.utc)
 def _iso(d): return d.astimezone(timezone.utc).isoformat().replace("+00:00","Z")
 def _local(s): return datetime.fromisoformat(s.replace("Z","+00:00")).astimezone(TZ)
 def _round(x,n=1): return None if x is None else round(x,n)
@@ -108,13 +109,7 @@ def epley(kg,reps):
   if not kg or not reps or reps<1: return None
   return kg if reps==1 else kg*(1+reps/30)
 def _session_for(c,t,typ):
-  r=c.execute("SELECT s.id,max(x.performed_at) last FROM sessions s JOIN sets x ON x.session_id=s.id GROUP BY s.id ORDER BY last DESC LIMIT 1").fetchone()
-  if r and r["last"]:
-    last=_parse_time(r["last"])
-    if timedelta(0)<=t-last<=timedelta(minutes=SESSION_GAP_MIN) or timedelta(0)<=last-t<=timedelta(minutes=SESSION_GAP_MIN):
-      c.execute("UPDATE sessions SET ended_at=max(coalesce(ended_at,''),?), type=CASE WHEN type=? THEN type ELSE 'mixed' END WHERE id=?",(_iso(t),typ,r["id"]))
-      return r["id"],False
-  return c.execute("INSERT INTO sessions(started_at,ended_at,type) VALUES(?,?,?)",(_iso(t),_iso(t),typ)).lastrowid,True
+  return workouts.session_for_log(c,t,typ)
 def log_sets(c,sets,performed_at=None,notes=None):
   if not sets: raise UserError("sets must be a non-empty list")
   t0=_parse_time(performed_at); unit_default=display_unit(c)
@@ -133,10 +128,11 @@ def log_sets(c,sets,performed_at=None,notes=None):
     return {"status":"needs_confirmation","logged":[],"problems":problems,
             "hint":"Nothing was saved. Confirm the exercise with the user, then call add_alias (or add_exercise) and retry."}
   typ={r["category"] for _,r in resolved}; typ=typ.pop() if len(typ)==1 else "mixed"
-  sid,new=_session_for(c,t0,typ)
-  if notes: c.execute("UPDATE sessions SET notes=trim(coalesce(notes,'')||' '||?) WHERE id=?",(notes,sid))
   out=[]; now=dbm.now()
-  for s,r in resolved:
+  with dbm.transaction(c):
+   sid,new=_session_for(c,t0,typ)
+   if notes: c.execute("UPDATE sessions SET notes=trim(coalesce(notes,'')||' '||?) WHERE id=?",(notes,sid))
+   for s,r in resolved:
     unit=s.get("unit") or unit_default; w=s.get("weight")
     kg=None if w is None else (w*LB if unit=="lb" else float(w))
     prev_best=c.execute("SELECT max(e1rm_kg) FROM sets WHERE exercise_id=? AND is_warmup=0",(r["exercise_id"],)).fetchone()[0]
@@ -154,8 +150,8 @@ def log_sets(c,sets,performed_at=None,notes=None):
         "e1rm":to_unit(e,unit) if e else None,"is_pr":pr,"matched_from":s["exercise"] if r["match"]!="exact" or norm(s["exercise"])!=norm(r["canonical"]) else None})
       if e: prev_best=max(prev_best or 0,e)
       if kg is None and s.get("reps"): prev_reps=max(prev_reps or 0,s["reps"])
-  c.commit()
-  return {"status":"logged","session_id":sid,"new_session":new,"performed_at_local":_local(_iso(t0)).isoformat(),"logged":out}
+   estimate=calories.estimate_session(c,sid)
+  return {"status":"logged","session_id":sid,"new_session":new,"performed_at_local":_local(_iso(t0)).isoformat(),"logged":out,"calorie_estimate":estimate}
 
 def _set_row(c,r,unit):
   return {"set_id":r["id"],"session_id":r["session_id"],"exercise":r["canonical_name"],"name_zh":r["name_zh"],"set_index":r["set_index"],
@@ -254,11 +250,12 @@ def log_hiit(c,hiit_id,completed_rounds,total_seconds,status="completed"):
   if status not in("completed","aborted"): raise UserError("status must be completed|aborted")
   if r["status"]!="planned": return {"status":"already_logged","hiit_id":hiit_id,"previous_status":r["status"]}
   t=datetime.now(timezone.utc).replace(microsecond=0); start=t-timedelta(seconds=int(total_seconds))
-  sid=c.execute("INSERT INTO sessions(started_at,ended_at,type,title,duration_min,source) VALUES(?,?,'hiit',?,?,'hiit_timer')",
-                (_iso(start),_iso(t),r["name"],round(total_seconds/60,1))).lastrowid
+  sid=c.execute("INSERT INTO sessions(started_at,ended_at,type,title,duration_min,source,status,start_mode,last_activity_at) VALUES(?,?,'hiit',?,?,'hiit_timer','completed','implicit',?)",
+                (_iso(start),_iso(t),r["name"],round(total_seconds/60,1),_iso(t))).lastrowid
   c.execute("UPDATE hiit_workouts SET status=?,completed_rounds=?,total_seconds=?,completed_at=?,session_id=? WHERE id=?",
             (status,completed_rounds,total_seconds,_iso(t),sid,hiit_id))
-  c.commit(); return {"status":status,"hiit_id":hiit_id,"session_id":sid,"completed_rounds":completed_rounds,"total_seconds":total_seconds}
+  c.commit(); estimate=calories.estimate_session(c,sid)
+  return {"status":status,"hiit_id":hiit_id,"session_id":sid,"completed_rounds":completed_rounds,"total_seconds":total_seconds,"calorie_estimate":estimate}
 
 # ---------- activities (hike / cardio sessions) ----------
 MI=1.609344; FT=0.3048
@@ -271,12 +268,15 @@ def log_activity(c,type,duration_min,distance=None,distance_unit=None,elevation_
   km=None if distance is None else distance*(MI if du=="mi" else 1)
   m=None if elevation_gain is None else elevation_gain*(FT if eu=="ft" else 1)
   t=_parse_time(performed_at); stype="hike" if type=="hike" else "cardio"
-  sid=c.execute("INSERT INTO sessions(started_at,ended_at,type,title,duration_min,distance_km,elevation_gain_m,rpe,notes,source) VALUES(?,?,?,?,?,?,?,?,?,'chat')",
-    (_iso(t),_iso(t+timedelta(minutes=duration_min)),stype,title or type,duration_min,km,m,rpe,notes)).lastrowid
-  c.commit()
+  end=t+timedelta(minutes=duration_min)
+  with dbm.transaction(c):
+    sid,new=workouts.session_for_log(c,t,stype)
+    c.execute("UPDATE sessions SET title=?,duration_min=?,distance_km=?,elevation_gain_m=?,rpe=?,notes=?,last_activity_at=? WHERE id=?",
+      (title or type,duration_min,km,m,rpe,notes,_iso(end),sid))
+    estimate=calories.estimate_session(c,sid)
   return {"status":"logged","session_id":sid,"type":stype,"activity":type,"duration_min":duration_min,
     "distance":distance,"distance_unit":du if distance is not None else None,"elevation_gain":elevation_gain,"elevation_unit":eu if elevation_gain is not None else None,
-    "performed_at_local":_local(_iso(t)).isoformat()}
+    "performed_at_local":_local(_iso(t)).isoformat(),"calorie_estimate":estimate}
 def delete_session(c,session_id):
   r=c.execute("SELECT * FROM sessions WHERE id=?",(session_id,)).fetchone()
   if not r: raise UserError("no such session")

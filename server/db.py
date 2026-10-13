@@ -42,7 +42,10 @@ def connect(path=None):
   os.makedirs(os.path.dirname(os.path.abspath(path)),exist_ok=True)
   c=sqlite3.connect(path); c.row_factory=sqlite3.Row
   c.execute("PRAGMA foreign_keys=ON"); c.execute("PRAGMA journal_mode=WAL")
-  init(c); return c
+  init(c)
+  import workouts
+  workouts.reconcile_active(c)
+  return c
 
 @contextmanager
 def transaction(c):
