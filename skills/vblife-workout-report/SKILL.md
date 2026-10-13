@@ -10,7 +10,7 @@ Always provide an easy-to-read text summary from the structured result, whether 
 
 1. Period and primary goal progress.
 2. Sessions, training minutes, strength volume, cardio duration, distance, and estimated workout calories with confidence coverage.
-3. Confirmed nutrition totals for a day or per-day averages and recorded-day count for longer periods; keep consumed and burned energy separate.
+3. Confirmed nutrition totals for a day or per-day averages, recorded-day count, and goal-hit rates for longer periods; keep consumed and burned energy separate.
 4. Trends, workout mix, PRs, streaks, routine use, and one or two actionable recommendations.
 
 Weekly reports explain the six weekly points for training time, strength volume, and cardio duration. Monthly reports explain the same three metrics across six monthly points. Annual reports explain twelve monthly points. Daily reports cover the recent four-week rhythm.

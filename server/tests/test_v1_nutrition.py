@@ -82,6 +82,13 @@ class NutritionTest(unittest.TestCase):
         self.assertEqual(result["version"], "mifflin-dga-v1")
         self.assertFalse(result["saved"])
 
+    def test_partial_recommendations_do_not_fabricate_missing_profile_values(self):
+        result = nutrition.recommend_goals({"age": 35, "weight_kg": 80})
+        self.assertNotIn("calories_kcal", result["recommendations"])
+        self.assertIn("protein_g_range", result["recommendations"])
+        self.assertIn("height_cm", result["missing_for_energy"])
+        self.assertEqual(result["assumptions"], {"age": 35, "weight_kg": 80})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -59,6 +59,7 @@ class ProductContractTest(unittest.TestCase):
         self.assertNotIn("Charles", text)
         self.assertNotIn("/home/box/workout", text)
         self.assertNotIn("fallback_url", text)
+        self.assertNotIn("within 30 min", text)
 
     def test_readme_documents_runtime_privacy_and_testing(self):
         text = read("README.md")
@@ -69,6 +70,13 @@ class ProductContractTest(unittest.TestCase):
         self.assertNotIn("Workout Tracker", text)
         self.assertNotIn("/home/box/workout", text)
         self.assertNotIn("site/", text)
+
+    def test_live_server_copy_is_user_generic(self):
+        text = "\n".join(read(path) for path in ("server/server.py", "server/coach.py"))
+        self.assertNotIn("Charles", text)
+        self.assertNotIn("workout-tracker", text)
+        self.assertNotIn("/home/box/workout", text)
+        self.assertNotIn("fallback_url", text)
 
 
 if __name__ == "__main__":

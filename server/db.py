@@ -93,6 +93,7 @@ CREATE TABLE workout_routine_items(
       "source_routine_id INTEGER REFERENCES workout_routines(id) ON DELETE SET NULL",
       "start_mode TEXT NOT NULL DEFAULT 'implicit' CHECK(start_mode IN('implicit','routine','conversational_plan'))",
       "last_activity_at TEXT", "idempotency_key TEXT",
+      "session_weight_kg REAL", "planned_duration_min REAL", "activity_session_item_id INTEGER",
       "estimated_calories REAL", "calorie_confidence TEXT", "calorie_weight_kg REAL",
       "calorie_duration_min REAL", "calorie_met REAL", "calorie_version TEXT", "calorie_assumptions TEXT"
     ):

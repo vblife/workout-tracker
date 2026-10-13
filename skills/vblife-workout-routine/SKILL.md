@@ -10,6 +10,6 @@ description: Use when the user wants to create, save, inspect, edit, archive, re
 - Use `archive_routine` instead of deleting; restore with `restore_routine`.
 - Call `start_routine` only when the user asks to begin. It creates an independent active-workout snapshot with pending items and no completed sets.
 
-If another workout is active, ask the user to resume, finish, or abandon it; never replace it silently. During the workout, a pivot changes only the active snapshot. Change the source routine only on a separate explicit request.
+If another workout is active, ask the user to resume, finish, or abandon it; never replace it silently. During the workout, use `add_workout_item`, `replace_workout_item`, `reorder_workout_items`, or `set_workout_item_status` for a pivot. These tools change only the active snapshot. Change the source routine only on a separate explicit request.
 
 A conversational plan is not automatically a saved routine. Create one only when the user explicitly asks to reuse or save it.

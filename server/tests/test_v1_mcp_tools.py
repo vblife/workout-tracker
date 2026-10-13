@@ -13,10 +13,12 @@ _spec.loader.exec_module(mcp_server)
 
 
 EXPECTED_NEW_TOOLS = {
-    "create_goal", "list_goals", "delete_goal", "goal_progress",
+    "create_goal", "update_goal", "list_goals", "delete_goal", "goal_progress",
     "add_body_weight", "list_body_weight", "update_body_weight", "delete_body_weight",
     "create_routine", "list_routines", "get_routine", "update_routine", "archive_routine", "restore_routine", "start_routine",
     "start_workout", "get_active_workout", "finish_workout", "abandon_workout",
+    "add_workout_item", "replace_workout_item", "reorder_workout_items", "set_workout_item_status",
+    "move_set", "merge_workouts", "update_set", "update_activity",
     "nutrition_status", "search_usda", "validate_nutrition", "save_nutrition", "list_nutrition",
     "update_nutrition", "delete_nutrition", "nutrition_daily_totals", "recommend_nutrition_goals",
 }
@@ -55,6 +57,12 @@ class MCPToolsTest(unittest.TestCase):
         self.assertEqual(settings["unit"], "kg")
         self.assertFalse(settings["reminders_enabled"])
         self.assertEqual(settings["hiit_defaults"]["rounds"], 20)
+        self.call("add_body_weight", {"value": 80, "unit": "kg"})
+        context = self.call("get_context")["structuredContent"]
+        self.assertEqual(context["latest_body_weight"]["input_value"], 80)
+        self.assertIn("nutrition_setup", context)
+        self.call("update_settings", {"settings": {"hiit_defaults": None}})
+        self.assertNotIn("hiit_defaults", self.call("get_context")["structuredContent"]["settings"])
 
     def test_every_operation_reconciles_stale_workout(self):
         started = workouts.start_workout(self.s.c, mode="conversational_plan", at="2020-01-01T08:00:00Z")

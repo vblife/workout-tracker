@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 sys_path = os.path.join(os.path.dirname(__file__), "..")
@@ -11,6 +12,7 @@ import db as dbm
 import core
 import workouts
 import calories
+import routines
 
 
 def utc(value):
@@ -89,6 +91,30 @@ class WorkoutLifecycleTest(unittest.TestCase):
         row = self.c.execute("SELECT status,start_mode,estimated_calories FROM sessions WHERE id=?", (result["session_id"],)).fetchone()
         self.assertEqual((row["status"], row["start_mode"]), ("completed", "implicit"))
         self.assertGreater(row["estimated_calories"], 0)
+
+    def test_hiit_completion_rolls_back_as_one_write(self):
+        hiit = core.create_hiit(self.c, rounds=2, segments=[{"kind": "work", "seconds": 40}], warmup_s=0, cooldown_s=0)
+        with mock.patch("calories.estimate_session", side_effect=RuntimeError("injected")):
+            with self.assertRaises(RuntimeError):
+                core.log_hiit(self.c, hiit["hiit_id"], 2, 80)
+        self.assertEqual(self.c.execute("SELECT status FROM hiit_workouts WHERE id=?", (hiit["hiit_id"],)).fetchone()[0], "planned")
+        self.assertEqual(self.c.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
+
+    def test_session_weight_and_planned_duration_precede_fallbacks(self):
+        started = workouts.start_workout(self.c, mode="conversational_plan", session_weight=200,
+                                         weight_unit="lb", planned_duration_min=45,
+                                         at=utc("2026-10-01T08:00:00Z"))
+        estimate = calories.estimate_session(self.c, started["session_id"])
+        self.assertAlmostEqual(estimate["weight_kg"], 90.72, places=2)
+        self.assertEqual(estimate["duration_min"], 45)
+        self.assertNotIn("fallback body weight", " ".join(estimate["assumptions"]))
+
+    def test_routine_estimated_duration_is_snapshotted_for_calories(self):
+        routine = routines.create_routine(self.c, "Long Day", [{"exercise": "squat", "target_sets": 3, "target_reps": 5}],
+                                          estimated_duration_min=60)
+        started = routines.start_routine(self.c, routine["routine_id"], at="2026-10-01T08:00:00Z")
+        estimate = calories.estimate_session(self.c, started["session_id"])
+        self.assertEqual(estimate["duration_min"], 60)
 
 
 if __name__ == "__main__":

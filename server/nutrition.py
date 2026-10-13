@@ -147,23 +147,35 @@ def search_usda(query, api_key=None, opener=None):
 
 def recommend_goals(inputs):
     required = ("age", "weight_kg", "height_cm", "sex", "activity_level", "objective")
-    if any(inputs.get(key) is None for key in required):
-        raise _error("age, weight, height, sex, activity level, and objective are required for an energy recommendation")
-    if not 18 <= inputs["age"] <= 100:
+    if inputs.get("age") is None:
+        raise _error("age is required to confirm that adult recommendations are appropriate")
+    if not isinstance(inputs["age"], (int, float)) or not 18 <= inputs["age"] <= 100:
         raise _error("personalized nutrition recommendations are limited to adults")
     if inputs.get("pregnant") or inputs.get("breastfeeding") or inputs.get("eating_disorder") or inputs.get("medical_condition"):
         raise _error("this profile needs qualified clinical nutrition guidance")
-    if inputs["sex"] not in ("male", "female"):
-        raise _error("sex used for calculation must be male or female")
     factors = {"sedentary": 1.2, "light": 1.375, "moderate": 1.55, "active": 1.725, "very_active": 1.9}
-    if inputs["activity_level"] not in factors or inputs["objective"] not in ("maintenance", "fat_loss", "muscle_gain"):
-        raise _error("unsupported activity level or objective")
-    sex_term = 5 if inputs["sex"] == "male" else -161
-    resting = 10 * inputs["weight_kg"] + 6.25 * inputs["height_cm"] - 5 * inputs["age"] + sex_term
-    calories = resting * factors[inputs["activity_level"]] + {"maintenance": 0, "fat_loss": -350, "muscle_gain": 250}[inputs["objective"]]
-    protein = inputs["weight_kg"] * (1.8 if inputs["objective"] == "muscle_gain" else 1.6)
-    return {"saved": False, "version": "mifflin-dga-v1", "recommendations": {
-        "calories_kcal": round(calories / 10) * 10, "protein_g": round(protein), "fiber_g": 30,
-        "saturated_fat_g_max": round(calories * 0.1 / 9), "sodium_mg_max": 2300,
-    }, "assumptions": {key: inputs[key] for key in required},
-    "notice": "Educational estimate for generally healthy adults; confirm before saving."}
+    if inputs.get("sex") is not None and inputs["sex"] not in ("male", "female"):
+        raise _error("sex used for calculation must be male or female")
+    if inputs.get("activity_level") is not None and inputs["activity_level"] not in factors:
+        raise _error("unsupported activity level")
+    if inputs.get("objective") is not None and inputs["objective"] not in ("maintenance", "fat_loss", "muscle_gain"):
+        raise _error("unsupported objective")
+    if inputs.get("weight_kg") is not None and (not isinstance(inputs["weight_kg"], (int, float)) or inputs["weight_kg"] <= 0):
+        raise _error("weight_kg must be greater than zero")
+    recommendations = {"sodium_mg_max": 2300}
+    if inputs.get("weight_kg") is not None:
+        recommendations["protein_g_range"] = [round(inputs["weight_kg"] * 1.2), round(inputs["weight_kg"] * 1.8)]
+    if inputs.get("sex") is not None:
+        recommendations["fiber_g"] = 38 if inputs["sex"] == "male" and inputs["age"] <= 50 else 25
+    missing = [key for key in required if inputs.get(key) is None]
+    if not missing:
+        sex_term = 5 if inputs["sex"] == "male" else -161
+        resting = 10 * inputs["weight_kg"] + 6.25 * inputs["height_cm"] - 5 * inputs["age"] + sex_term
+        calories = resting * factors[inputs["activity_level"]] + {"maintenance": 0, "fat_loss": -350, "muscle_gain": 250}[inputs["objective"]]
+        protein = inputs["weight_kg"] * (1.8 if inputs["objective"] == "muscle_gain" else 1.6)
+        recommendations.update({"calories_kcal": round(calories / 10) * 10, "protein_g": round(protein),
+                                "saturated_fat_g_max": round(calories * 0.1 / 9)})
+    assumptions = {key: inputs[key] for key in required if inputs.get(key) is not None}
+    return {"saved": False, "version": "mifflin-dga-v1", "basis": "Mifflin-St Jeor plus Dietary Guidelines guardrails",
+            "recommendations": recommendations, "missing_for_energy": missing, "assumptions": assumptions,
+            "notice": "Educational estimate for generally healthy adults; confirm before saving."}

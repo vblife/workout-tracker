@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -78,6 +79,31 @@ class RoutinesGoalsTest(unittest.TestCase):
         self.assertFalse(rows[recommended["goal_id"]]["active"])
         self.assertTrue(rows[direct["goal_id"]]["active"])
 
+    def test_goal_can_be_updated_and_progress_returns_recomputed_streaks(self):
+        goal = goals.create_goal(self.c, domain="workout", period="day", metric="workout_sessions",
+                                 semantics="minimum", target_value=1, unit="sessions", effective_start_date="2026-10-01")
+        for day in ("01", "02"):
+            core.log_sets(self.c, [{"exercise": "squat", "reps": 5}], performed_at=f"2026-10-{day}T16:00:00Z")
+            workouts.finish_workout(self.c, at=f"2026-10-{day}T16:05:00Z")
+        updated = goals.update_goal(self.c, goal["goal_id"], target_value=1, display_precision=1)
+        self.assertEqual(updated["display_precision"], 1)
+        progress = goals.goal_progress(self.c, goal["goal_id"], anchor_date="2026-10-02")
+        self.assertEqual(progress["current_streak"], 2)
+        self.assertEqual(progress["best_streak"], 2)
+        self.assertEqual(len(progress["history"]), 2)
+
+    def test_training_days_are_counted_in_configured_timezone(self):
+        goal = goals.create_goal(self.c, domain="workout", period="day", metric="training_days",
+                                 semantics="exact", target_value=1, unit="days", effective_start_date="2026-10-01")
+        core.log_sets(self.c, [{"exercise": "squat", "reps": 5}], performed_at="2026-10-05T23:30:00Z")
+        workouts.finish_workout(self.c, at="2026-10-05T23:35:00Z")
+        core.log_sets(self.c, [{"exercise": "squat", "reps": 5}], performed_at="2026-10-06T01:00:00Z")
+        workouts.finish_workout(self.c, at="2026-10-06T01:05:00Z")
+
+        progress = goals.goal_progress(self.c, goal["goal_id"], anchor_date="2026-10-05")
+        self.assertEqual(progress["current"], 1)
+        self.assertTrue(progress["achieved"])
+
     def test_body_weight_normalizes_and_recalculates_estimates(self):
         entry = profile.add_body_weight(self.c, 220, "lb", measured_at="2026-10-01T07:00:00Z")
         self.assertAlmostEqual(entry["weight_kg"], 99.79, places=2)
@@ -87,6 +113,13 @@ class RoutinesGoalsTest(unittest.TestCase):
         profile.delete_body_weight(self.c, entry["weight_id"])
         self.assertEqual(profile.list_body_weight(self.c)["entries"], [])
         self.assertEqual(self.c.execute("SELECT calorie_weight_kg FROM sessions WHERE id=?", (logged["session_id"],)).fetchone()[0], 70)
+
+    def test_body_weight_write_rolls_back_if_recalculation_fails(self):
+        core.log_sets(self.c, [{"exercise": "squat", "reps": 5}], performed_at="2026-10-01T08:00:00Z")
+        with mock.patch("calories.estimate_session", side_effect=RuntimeError("injected")):
+            with self.assertRaises(RuntimeError):
+                profile.add_body_weight(self.c, 180, "lb", measured_at="2026-10-01T07:00:00Z")
+        self.assertEqual(self.c.execute("SELECT count(*) FROM body_weight").fetchone()[0], 0)
 
 
 if __name__ == "__main__":

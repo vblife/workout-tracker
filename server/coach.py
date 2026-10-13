@@ -2,7 +2,7 @@
 import json,math
 from datetime import datetime,timedelta,timezone
 import core
-from core import UserError,LB,TZ,_local,_iso,_parse_time,to_unit,display_unit,get_settings
+from core import UserError,LB,_local,_iso,_parse_time,to_unit,display_unit,get_settings,user_timezone
 LOWER={"quads","glutes","hamstrings","calves","legs"}
 GROUPS={"push":{"chest","triceps","shoulders"},"pull":{"back","biceps","traps","forearms"},"legs":LOWER,"core":{"core"}}
 RECOVERY_H=48
@@ -37,13 +37,13 @@ def equipment_status(c,ex):
   return "available" if ex["equipment"] in eq else "unavailable"
 
 def suggest_next(c,exercise,target_rep_range=None,sets=None,now=None):
-  eid=core._lookup_exercise(c,exercise); ex=_exrow(c,eid); unit=display_unit(c)
+  eid=core._lookup_exercise(c,exercise); ex=_exrow(c,eid); unit=display_unit(c); tz=user_timezone(c)
   lo,hi=rep_range(c,target_rep_range); n_sets=sets or 3
   now=now or datetime.now(timezone.utc)
   hist=_sessions_for(c,eid)
   base={"exercise":ex["canonical_name"],"name_zh":ex["name_zh"],"unit":unit,"rep_range":f"{lo}-{hi}",
         "equipment":ex["equipment"],"equipment_status":equipment_status(c,ex)}
-  if base["equipment_status"]=="unknown": base["equipment_note"]=f"Equipment not set; this needs {ex['equipment']}. Ask Charles (update_settings equipment)."
+  if base["equipment_status"]=="unknown": base["equipment_note"]=f"Equipment not set; this needs {ex['equipment']}. Ask the user or call update_settings when they provide it."
   if not hist:
     tip={"reps_weight":f"No history. Start with {n_sets}x{lo} at a weight you could lift ~{hi+2} times; log it and next time I'll progress from there.",
          "reps":f"No history. Do {n_sets} sets of as many good reps as possible (stop 1-2 short of failure).",
@@ -53,7 +53,7 @@ def suggest_next(c,exercise,target_rep_range=None,sets=None,now=None):
   L=last["sets"]; last_desc=", ".join(
     f"{s['reps'] or ''}{'x' if s['reps'] else ''}{to_unit(s['weight_kg'],unit) if s['weight_kg'] is not None else 'BW'}" if ex["tracking"] in("reps_weight","reps")
     else f"{s['duration_s'] or 0}s" if ex["tracking"]=="duration" else f"{s['distance_m'] or 0}m" for s in L)
-  base.update(last_session_local=_local(last["t"]).strftime("%Y-%m-%d"),days_since=days,last_sets=last_desc)
+  base.update(last_session_local=_local(last["t"],tz).strftime("%Y-%m-%d"),days_since=days,last_sets=last_desc)
   if ex["tracking"]=="duration":
     best=max(s["duration_s"] or 0 for s in L); tgt=best+(10 if best<60 else 15)
     return {**base,"status":"progress","sets":max(len(L),3),"duration_s":tgt,"rationale":f"Last best hold {best}s → aim for {tgt}s per set."}
@@ -95,11 +95,11 @@ def _last_trained(c):
   return out
 def daily_plan_context(c,date=None,now=None):
   """Facts + rule-based focus suggestion for composing today's plan (the LLM writes the plan)."""
-  s=get_settings(c); unit=display_unit(c); now=now or datetime.now(timezone.utc)
-  day=datetime.fromisoformat(date).date() if date else now.astimezone(TZ).date()
-  wk=day-timedelta(days=day.weekday()); wk_utc=_iso(datetime.combine(wk,datetime.min.time(),TZ))
+  s=get_settings(c); unit=display_unit(c); tz=user_timezone(c); now=now or datetime.now(timezone.utc)
+  day=datetime.fromisoformat(date).date() if date else now.astimezone(tz).date()
+  wk=day-timedelta(days=day.weekday()); wk_utc=_iso(datetime.combine(wk,datetime.min.time(),tz))
   sess=c.execute("SELECT * FROM sessions WHERE started_at>=? ORDER BY started_at",(wk_utc,)).fetchall()
-  days_done=sorted({_local(r["started_at"]).date().isoformat() for r in sess if _local(r["started_at"]).date()<=day})
+  days_done=sorted({_local(r["started_at"],tz).date().isoformat() for r in sess if _local(r["started_at"],tz).date()<=day})
   trained_today=day.isoformat() in days_done
   target=s.get("days_per_week") or 4; remaining_days=6-day.weekday()+1
   need=max(0,target-len(days_done))
@@ -113,7 +113,7 @@ def daily_plan_context(c,date=None,now=None):
     m=sum(r["duration_min"] or 0 for r in c.execute("SELECT duration_min FROM sessions WHERE type IN('cardio','hike','hiit') AND started_at>=? AND started_at<?",(a,b)))
     m+=sum((r[0] or 0)/60 for r in c.execute("SELECT x.duration_s FROM sets x JOIN exercises e ON e.id=x.exercise_id WHERE e.category IN('cardio','hike') AND x.performed_at>=? AND x.performed_at<?",(a,b)))
     return round(m)
-  wk_next=_iso(datetime.combine(wk+timedelta(days=7),datetime.min.time(),TZ)); prev_wk=_iso(datetime.combine(wk-timedelta(days=7),datetime.min.time(),TZ))
+  wk_next=_iso(datetime.combine(wk+timedelta(days=7),datetime.min.time(),tz)); prev_wk=_iso(datetime.combine(wk-timedelta(days=7),datetime.min.time(),tz))
   cm_this,cm_prev=cardio_min(wk_utc,wk_next),cardio_min(prev_wk,wk_utc)
   hikes=[r for r in sess if r["type"]=="hike"]
   # rule-based focus
@@ -152,4 +152,4 @@ def daily_plan_context(c,date=None,now=None):
     "equipment_known":bool(s.get("equipment")),"week":{"days_trained":days_done,"target":target,"still_needed":need,"days_left_incl_today":remaining_days,"trained_today":trained_today,
       "cardio_minutes":cm_this,"cardio_minutes_last_week":cm_prev,"cardio_cap_10pct":round(max(cm_prev,30)*1.1),"hikes":len(hikes)},
     "muscle_recovery":groups,"suggested_focus":focus,"rest_recommended":rest,"rationale":why,"candidate_exercises":cands,
-    "notes":[] if s.get("equipment") else ["Equipment unknown: candidates marked equipment_status='unknown' need gym gear; offer bodyweight alternatives or ask Charles."]}
+    "notes":[] if s.get("equipment") else ["Equipment unknown: candidates marked equipment_status='unknown' need gym gear; offer bodyweight alternatives or ask the user."]}

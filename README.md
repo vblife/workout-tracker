@@ -19,7 +19,7 @@ args: [/home/vblife/workout/server/server.py, --stdio]
 
 - Quick logs automatically start a workout; inactivity longer than 15 minutes completes it.
 - Conversational plans are ephemeral. Starting an accepted plan stores only its active-workout snapshot.
-- Completed workouts can become reusable routines on request. Start, resume, pivot, finish, or abandon a routine snapshot without changing its source routine.
+- Completed workouts can become reusable routines on request. Start, resume, add, replace, reorder, skip, finish, or abandon items in a routine snapshot without changing its source routine. Misgrouped entries can be moved or adjacent completed workouts merged with confirmation.
 - Body weight is optional. Workout calories always remain estimates with confidence and assumptions.
 - Meal photos are analyzed in conversation. Saving requires confirmation and writes only nutrients, timestamp, and estimation metadata to `workout.db`.
 - Reports support day, week, month, quarter, year, and all time, including six-week, six-month, and twelve-month trends as applicable.

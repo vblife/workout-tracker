@@ -15,7 +15,7 @@ button{font-size:17px;padding:9px 18px;margin:4px;border-radius:10px;border:1px 
 <button id="b">Start</button><button id="sk">Skip</button><button id="end">Finish</button><div id="msg"></div><div id="plan"></div>
 <script>
 const $=i=>document.getElementById(i),fmt=s=>Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
-let cfg={name:"HIIT",rounds:8,segments:[{kind:"work",seconds:20},{kind:"rest",seconds:10}],warmup_s:0,cooldown_s:0},hiitId=null;
+let cfg={name:"HIIT",rounds:20,segments:[{kind:"work",seconds:40},{kind:"rest",seconds:20}],warmup_s:10,cooldown_s:60},hiitId=null;
 let plan=[],pi=0,left=0,iv=null,elapsed=0,started=false,logged=false,rid=1,pending={},bridge=false,countdown=0,ac=null;
 function build(){plan=[];if(cfg.warmup_s)plan.push({kind:"warmup",seconds:cfg.warmup_s,round:0});
  for(let r=1;r<=cfg.rounds;r++)cfg.segments.forEach((s,j)=>{if(r==cfg.rounds&&j==cfg.segments.length-1&&s.kind=="rest")return;plan.push({...s,round:r})});

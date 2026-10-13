@@ -20,7 +20,9 @@ def estimate_session(c, session_id):
         raise UserError("no such session")
     assumptions = []
     weight = c.execute("SELECT weight_kg FROM body_weight WHERE measured_at<=? ORDER BY measured_at DESC,id DESC LIMIT 1", (row["started_at"],)).fetchone()
-    if weight:
+    if row["session_weight_kg"]:
+        weight_kg = row["session_weight_kg"]
+    elif weight:
         weight_kg = weight[0]
     else:
         weight_kg = 70.0
@@ -30,6 +32,9 @@ def estimate_session(c, session_id):
         duration = max(0, (_dt(row["ended_at"]) - _dt(row["started_at"])).total_seconds() / 60)
     if not duration and row["last_activity_at"] and row["last_activity_at"] != row["started_at"]:
         duration = max(0, (_dt(row["last_activity_at"]) - _dt(row["started_at"])).total_seconds() / 60)
+    if not duration and row["planned_duration_min"]:
+        duration = row["planned_duration_min"]
+        assumptions.append("planned duration")
     if not duration:
         count = c.execute("SELECT count(*) FROM sets WHERE session_id=?", (session_id,)).fetchone()[0]
         duration = max(5.0, count * 3.0)

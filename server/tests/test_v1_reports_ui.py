@@ -62,6 +62,22 @@ class ReportsUITest(unittest.TestCase):
         self.assertEqual((result["nutrition"]["entries"], result["nutrition"]["calories_kcal"]), (1, 500))
         self.assertEqual(len(result["trend_series"]["points"]), 28)
 
+    def test_daily_report_uses_configured_timezone(self):
+        core.update_settings(self.c, {"timezone": "Asia/Tokyo"})
+        core.log_sets(self.c, [{"exercise": "squat", "reps": 5}], performed_at="2026-10-01T15:30:00Z")
+        workouts.finish_workout(self.c, at="2026-10-01T15:35:00Z")
+        result = reports.report(self.c, "day", anchor_date="2026-10-02", now=datetime(2026, 10, 1, 16, tzinfo=timezone.utc))
+        self.assertEqual(result["summary"]["sessions"], 1)
+        self.assertEqual(result["summary"]["days_trained"], 1)
+
+    def test_nutrition_averages_exclude_days_where_nutrient_is_unknown(self):
+        base = {"capture_timezone": "America/Los_Angeles", "calories_kcal": 500,
+                "estimation_method": "model_only", "confidence": "rough"}
+        nutrition.save_entry(self.c, {**base, "consumed_at": "2026-10-01T18:00:00Z", "protein_g": 40}, confirmed=True)
+        nutrition.save_entry(self.c, {**base, "consumed_at": "2026-10-02T18:00:00Z", "protein_g": None}, confirmed=True)
+        result = reports.report(self.c, "month", anchor_date="2026-10-12")
+        self.assertEqual(result["nutrition"]["protein_g_daily_average"], 40)
+
     def test_ui_is_advertised_only_for_compatible_clients(self):
         no_ui = mcp_server.Server(os.path.join(self.tmp.name, "no-ui.db"))
         self.addCleanup(no_ui.c.close)
@@ -84,6 +100,9 @@ class ReportsUITest(unittest.TestCase):
             html = ui.handle({"method": "resources/read", "params": {"uri": item["uri"]}})["contents"][0]["text"]
             self.assertIn("color-scheme", html)
             self.assertIn("@media", html)
+        report_html = ui.handle({"method": "resources/read", "params": {"uri": "ui://workout/report.html"}})["contents"][0]["text"]
+        for section in ("goal-progress", "coach-summary", "workout-totals", "nutrition-summary", "confidence", "trend-chart", "insights"):
+            self.assertIn(f'id="{section}"', report_html)
 
 
 if __name__ == "__main__":

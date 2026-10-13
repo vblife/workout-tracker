@@ -127,4 +127,5 @@ def start_routine(c, routine_id, idempotency_key=None, allow_archived=False, at=
         raise _error("routine is archived; restore it before starting")
     items = [{**item, "source_routine_item_id": item["routine_item_id"]} for item in routine["items"]]
     return workouts.start_workout(c, mode="routine", title=routine["name"], items=items,
-                                  source_routine_id=routine_id, idempotency_key=idempotency_key, at=at)
+                                  source_routine_id=routine_id, idempotency_key=idempotency_key,
+                                  planned_duration_min=routine["estimated_duration_min"], at=at)

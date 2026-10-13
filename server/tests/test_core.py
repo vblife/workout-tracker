@@ -60,8 +60,14 @@ class T(unittest.TestCase):
     q=core.query_stats(s.c,"e1rm","深蹲",group_by="week")
     s.assertEqual([p["period"] for p in q["series"]],["2026-08-31","2026-09-07"]); s.assertEqual(q["series"][1]["e1rm"],139.3)
     v=core.query_stats(s.c,"volume","squat",from_date="2026-09-08",to_date="2026-09-08",group_by="day"); s.assertEqual(v["series"][0]["volume"],840.0)
+  def test_stats_use_configured_timezone(s):
+    core.update_settings(s.c,{"timezone":"Asia/Tokyo"})
+    core.log_sets(s.c,[{"exercise":"squat","reps":5}],performed_at="2026-10-01T15:30:00Z")
+    q=core.query_stats(s.c,"reps","squat",group_by="day")
+    s.assertEqual(q["series"][0]["period"],"2026-10-02")
   def test_hiit(s):
-    h=core.create_hiit(s.c,name="Tabata",rounds=8,segments=[{"kind":"work","seconds":20,"exercise":"Burpee"},{"kind":"rest","seconds":10}])
+    defaults=core.hiit_config(); s.assertEqual((defaults["rounds"],defaults["segments"][0]["seconds"],defaults["segments"][1]["seconds"],defaults["warmup_s"],defaults["cooldown_s"]),(20,40,20,10,60))
+    h=core.create_hiit(s.c,name="Tabata",rounds=8,segments=[{"kind":"work","seconds":20,"exercise":"Burpee"},{"kind":"rest","seconds":10}],warmup_s=0,cooldown_s=0)
     s.assertEqual(h["planned_seconds"],230)
     r=core.log_hiit(s.c,h["hiit_id"],8,230); s.assertEqual(r["status"],"completed")
     s.assertEqual(core.log_hiit(s.c,h["hiit_id"],8,230)["status"],"already_logged")
