@@ -1,0 +1,169 @@
+"""Confirmed nutrient-only nutrition records and optional USDA lookups."""
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+import json
+import os
+import urllib.parse
+import urllib.request
+
+import db as dbm
+
+NUTRIENTS = ("calories_kcal", "protein_g", "carbohydrates_g", "fat_g", "fiber_g", "saturated_fat_g", "sugar_g", "sodium_mg")
+ALLOWED = set(NUTRIENTS) | {"consumed_at", "capture_timezone", "estimation_method", "confidence", "usda_contributed", "estimator_version", "source_components", "uncertainty_flags"}
+FLAGS = {"portion_uncertain", "preparation_unknown", "ingredients_unknown", "image_unclear", "usda_match_uncertain"}
+
+
+def _error(message):
+    from core import UserError
+    return UserError(message)
+
+
+def nutrition_status(c, environ=None):
+    environ = os.environ if environ is None else environ
+    settings = {row["key"]: json.loads(row["value"]) for row in c.execute("SELECT key,value FROM settings")}
+    return {"usda_available": bool(environ.get("USDA_FDC_API_KEY")),
+            "model_only_acknowledged": bool(settings.get("model_only_acknowledged", False)),
+            "mode": "usda_hybrid" if environ.get("USDA_FDC_API_KEY") else "model_only"}
+
+
+def validate_draft(payload):
+    if not isinstance(payload, dict):
+        raise _error("nutrition draft must be an object")
+    extra = sorted(set(payload) - ALLOWED)
+    if extra:
+        raise _error("nutrition draft contains forbidden fields: " + ", ".join(extra))
+    clean = {name: payload.get(name) for name in NUTRIENTS}
+    for name, value in clean.items():
+        if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0):
+            raise _error(f"{name} must be a non-negative number or null")
+    if all(value is None for value in clean.values()):
+        raise _error("at least one nutrient value is required")
+    method = payload.get("estimation_method")
+    confidence = payload.get("confidence")
+    if method not in ("usda_hybrid", "model_only") or confidence not in ("higher", "moderate", "rough"):
+        raise _error("estimation_method and confidence are required")
+    flags = payload.get("uncertainty_flags") or []
+    if not isinstance(flags, list) or any(flag not in FLAGS for flag in flags):
+        raise _error("uncertainty_flags contains an unsupported generic flag")
+    consumed_at = payload.get("consumed_at") or dbm.now()
+    try:
+        instant = datetime.fromisoformat(consumed_at.replace("Z", "+00:00"))
+        if instant.tzinfo is None:
+            raise ValueError
+        instant = instant.astimezone(timezone.utc)
+        capture_timezone = payload.get("capture_timezone") or "UTC"
+        local_date = instant.astimezone(ZoneInfo(capture_timezone)).date().isoformat()
+    except (ValueError, TypeError, KeyError):
+        raise _error("consumed_at needs an ISO timestamp with offset and capture_timezone needs an IANA zone")
+    return {**clean, "consumed_at": instant.isoformat().replace("+00:00", "Z"), "capture_timezone": capture_timezone,
+            "local_date": local_date, "estimation_method": method, "confidence": confidence,
+            "usda_contributed": bool(payload.get("usda_contributed", method == "usda_hybrid")),
+            "estimator_version": payload.get("estimator_version") or "agent-v1",
+            "source_components": payload.get("source_components"), "uncertainty_flags": flags}
+
+
+def _entry(c, entry_id):
+    row = c.execute("SELECT * FROM nutrition_entries WHERE id=?", (entry_id,)).fetchone()
+    if not row:
+        raise _error("no such nutrition entry")
+    result = dict(row)
+    result["entry_id"] = result.pop("id")
+    result["usda_contributed"] = bool(result["usda_contributed"])
+    result["uncertainty_flags"] = json.loads(result.pop("uncertainty_flags_json") or "[]")
+    return result
+
+
+def save_entry(c, payload, confirmed=False):
+    if confirmed is not True:
+        raise _error("explicit user confirmation is required before saving nutrition")
+    draft = validate_draft(payload)
+    now = dbm.now()
+    values = [draft[name] for name in NUTRIENTS]
+    with dbm.transaction(c):
+        entry_id = c.execute("""INSERT INTO nutrition_entries(
+            consumed_at,capture_timezone,local_date,calories_kcal,protein_g,carbohydrates_g,fat_g,fiber_g,saturated_fat_g,sugar_g,sodium_mg,
+            estimation_method,confidence,usda_contributed,estimator_version,source_components,uncertainty_flags_json,confirmed_at,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (draft["consumed_at"], draft["capture_timezone"], draft["local_date"], *values,
+             draft["estimation_method"], draft["confidence"], int(draft["usda_contributed"]), draft["estimator_version"],
+             draft["source_components"], json.dumps(draft["uncertainty_flags"]), now, now, now)).lastrowid
+    return _entry(c, entry_id)
+
+
+def update_entry(c, entry_id, payload, confirmed=False):
+    _entry(c, entry_id)
+    if confirmed is not True:
+        raise _error("explicit user confirmation is required before updating nutrition")
+    draft = validate_draft(payload)
+    values = [draft[name] for name in NUTRIENTS]
+    c.execute("""UPDATE nutrition_entries SET consumed_at=?,capture_timezone=?,local_date=?,
+        calories_kcal=?,protein_g=?,carbohydrates_g=?,fat_g=?,fiber_g=?,saturated_fat_g=?,sugar_g=?,sodium_mg=?,
+        estimation_method=?,confidence=?,usda_contributed=?,estimator_version=?,source_components=?,uncertainty_flags_json=?,
+        confirmed_at=?,updated_at=? WHERE id=?""", (draft["consumed_at"], draft["capture_timezone"], draft["local_date"], *values,
+        draft["estimation_method"], draft["confidence"], int(draft["usda_contributed"]), draft["estimator_version"],
+        draft["source_components"], json.dumps(draft["uncertainty_flags"]), dbm.now(), dbm.now(), entry_id))
+    c.commit()
+    return _entry(c, entry_id)
+
+
+def list_entries(c, from_date=None, to_date=None, limit=100):
+    query, args = "SELECT id FROM nutrition_entries WHERE 1=1", []
+    if from_date: query += " AND local_date>=?"; args.append(from_date)
+    if to_date: query += " AND local_date<=?"; args.append(to_date)
+    query += " ORDER BY consumed_at DESC,id DESC LIMIT ?"; args.append(max(1, min(int(limit), 1000)))
+    return {"entries": [_entry(c, row[0]) for row in c.execute(query, args)]}
+
+
+def delete_entry(c, entry_id):
+    _entry(c, entry_id)
+    c.execute("DELETE FROM nutrition_entries WHERE id=?", (entry_id,))
+    c.commit()
+    return {"status": "deleted", "entry_id": entry_id}
+
+
+def daily_totals(c, local_date):
+    expressions = ",".join(f"sum({name}) {name}" for name in NUTRIENTS)
+    row = c.execute(f"SELECT count(*) entries,{expressions} FROM nutrition_entries WHERE local_date=?", (local_date,)).fetchone()
+    return {"local_date": local_date, **{key: row[key] for key in row.keys()}}
+
+
+def search_usda(query, api_key=None, opener=None):
+    api_key = api_key or os.environ.get("USDA_FDC_API_KEY")
+    if not api_key:
+        return {"status": "model_only_fallback", "reason": "USDA API key is not configured", "matches": []}
+    opener = opener or urllib.request.urlopen
+    body = json.dumps({"query": query, "pageSize": 5}).encode("utf-8")
+    request = urllib.request.Request("https://api.nal.usda.gov/fdc/v1/foods/search?" + urllib.parse.urlencode({"api_key": api_key}),
+                                     data=body, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with opener(request, timeout=8) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        matches = [{"description": item.get("description"), "fdc_id": item.get("fdcId"), "nutrients": item.get("foodNutrients", [])}
+                   for item in data.get("foods", [])]
+        return {"status": "ok" if matches else "model_only_fallback", "reason": None if matches else "no credible USDA match", "matches": matches}
+    except Exception:
+        return {"status": "model_only_fallback", "reason": "USDA lookup unavailable", "matches": []}
+
+
+def recommend_goals(inputs):
+    required = ("age", "weight_kg", "height_cm", "sex", "activity_level", "objective")
+    if any(inputs.get(key) is None for key in required):
+        raise _error("age, weight, height, sex, activity level, and objective are required for an energy recommendation")
+    if not 18 <= inputs["age"] <= 100:
+        raise _error("personalized nutrition recommendations are limited to adults")
+    if inputs.get("pregnant") or inputs.get("breastfeeding") or inputs.get("eating_disorder") or inputs.get("medical_condition"):
+        raise _error("this profile needs qualified clinical nutrition guidance")
+    if inputs["sex"] not in ("male", "female"):
+        raise _error("sex used for calculation must be male or female")
+    factors = {"sedentary": 1.2, "light": 1.375, "moderate": 1.55, "active": 1.725, "very_active": 1.9}
+    if inputs["activity_level"] not in factors or inputs["objective"] not in ("maintenance", "fat_loss", "muscle_gain"):
+        raise _error("unsupported activity level or objective")
+    sex_term = 5 if inputs["sex"] == "male" else -161
+    resting = 10 * inputs["weight_kg"] + 6.25 * inputs["height_cm"] - 5 * inputs["age"] + sex_term
+    calories = resting * factors[inputs["activity_level"]] + {"maintenance": 0, "fat_loss": -350, "muscle_gain": 250}[inputs["objective"]]
+    protein = inputs["weight_kg"] * (1.8 if inputs["objective"] == "muscle_gain" else 1.6)
+    return {"saved": False, "version": "mifflin-dga-v1", "recommendations": {
+        "calories_kcal": round(calories / 10) * 10, "protein_g": round(protein), "fiber_g": 30,
+        "saturated_fat_g_max": round(calories * 0.1 / 9), "sodium_mg_max": 2300,
+    }, "assumptions": {key: inputs[key] for key in required},
+    "notice": "Educational estimate for generally healthy adults; confirm before saving."}
