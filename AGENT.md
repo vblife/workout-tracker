@@ -24,3 +24,7 @@ workout-onboarding · log-workout · daily-workout-plan · progressive-overload 
 ## Routines (suggested)
 - Daily 07:00 local: today's plan (daily-workout-plan).
 - Sunday 20:00: weekly report. 1st of month: monthly report. First day of quarter / year: quarterly / annual report.
+
+## Agent behavior evals
+
+Use the single `evals/workout-evals.yaml` Promptfoo configuration. `npm run test:evals` verifies the local harness without model usage, `npm run eval:validate` validates its structure, and `npm run eval:workout` evaluates GPT-6 Luna at max effort through the existing ChatGPT/Codex login. The live runner refuses `OPENAI_API_KEY` and `CODEX_API_KEY`. Every case gets a temporary SQLite database, and V1 contract failures remain expected until the corresponding implementation exists.

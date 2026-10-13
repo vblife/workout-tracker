@@ -29,6 +29,7 @@ providers:
               - --db
               - "{{workoutDbPath}}"
             cwd: "{{repoRoot}}"
+            default_tools_approval_mode: approve
             env:
               WORKOUT_DB: "{{workoutDbPath}}"
 

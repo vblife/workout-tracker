@@ -3,6 +3,24 @@ import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+const config = fileURLToPath(new URL('./workout-evals.yaml', import.meta.url));
+const output = fileURLToPath(new URL('./results/latest.json', import.meta.url));
+const promptfoo = fileURLToPath(
+  new URL('../node_modules/promptfoo/dist/src/entrypoint.js', import.meta.url),
+);
+
+export const promptfooArgs = [
+  promptfoo,
+  'eval',
+  '-c',
+  config,
+  '--no-cache',
+  '--output',
+  output,
+  '--max-concurrency',
+  '1',
+];
+
 export function assertSubscriptionEnvironment(env) {
   const present = ['OPENAI_API_KEY', 'CODEX_API_KEY'].filter((name) => env[name]);
   if (present.length) {
@@ -14,15 +32,10 @@ export function assertSubscriptionEnvironment(env) {
 
 function run() {
   assertSubscriptionEnvironment(process.env);
-  const config = fileURLToPath(new URL('./workout-evals.yaml', import.meta.url));
-  const output = fileURLToPath(new URL('./results/latest.json', import.meta.url));
-  const promptfoo = fileURLToPath(
-    new URL('../node_modules/promptfoo/dist/src/entrypoint.js', import.meta.url),
-  );
   mkdirSync(dirname(output), { recursive: true });
   const result = spawnSync(
     process.execPath,
-    [promptfoo, 'eval', '-c', config, '--no-cache', '--output', output],
+    promptfooArgs,
     { cwd: fileURLToPath(new URL('..', import.meta.url)), env: process.env, stdio: 'inherit' },
   );
   if (result.error) throw result.error;
