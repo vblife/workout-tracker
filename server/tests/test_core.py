@@ -9,7 +9,7 @@ class T(unittest.TestCase):
     s.c.close(); import shutil; shutil.rmtree(s.d)
   def test_seed(s):
     s.assertGreaterEqual(s.c.execute("select count(*) from exercises").fetchone()[0],75)
-    s.assertEqual(s.c.execute("select version from schema_version").fetchone()[0],1)
+    s.assertEqual(s.c.execute("select version from schema_version").fetchone()[0],2)
     for t in("exercises","aliases","sessions","sets","hiit_workouts","settings","schema_version"):
       s.c.execute(f"select * from {t} limit 1")
   def test_norm(s):
