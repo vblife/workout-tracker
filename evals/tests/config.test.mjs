@@ -69,4 +69,18 @@ test('contract cases cover every approved skill exactly by metadata set', () => 
     'vblife-workout-routine',
     'vblife-workout-setup',
   ]);
+
+  const byDescription = Object.fromEntries(cases.map((entry) => [entry.description, entry]));
+  assert.match(
+    byDescription['confirmed nutrition stores nutrient-only data'].vars.userMessage,
+    /Conversation so far:[\s\S]*Assistant:[\s\S]*User: I confirm/i,
+  );
+  assert.match(
+    byDescription['destructive session deletion asks for confirmation'].vars.userMessage,
+    /First log/i,
+  );
+  assert.match(
+    byDescription['pain report stops the movement instead of logging it'].vars.userMessage,
+    /I have not done another set/i,
+  );
 });
