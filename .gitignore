@@ -9,3 +9,4 @@ __pycache__/
 *.key
 .worktrees/
 evals/results/
+node_modules/
