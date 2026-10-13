@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build one contract-first Promptfoo suite named `workout-evals` that evaluates Workout Bot V1 agent behavior through the local stdio MCP server using GPT-6 Luna at max effort and the user's ChatGPT subscription.
+**Goal:** Build one contract-first Promptfoo suite named `workout-evals` that evaluates every approved `vblife-workout-*` skill through the local stdio MCP server using GPT-6 Luna at max effort and the user's ChatGPT subscription.
 
 **Architecture:** `evals/workout-evals.yaml` is the only Promptfoo configuration. A Codex SDK provider runs the bot prompt against a per-case temporary SQLite database exposed through the local `workout-bot` stdio server; extension hooks create and remove those databases, deterministic JavaScript assertions inspect tool traces and SQLite state, and explicitly pinned Codex SDK graders assess only conversational qualities. A small wrapper refuses API-key environments before invoking Promptfoo so evaluation always uses the existing ChatGPT login.
 
@@ -19,6 +19,7 @@
 - The Codex target is read-only, uses `approval_policy: never`, and has network and web search disabled.
 - The MCP server is local stdio and receives the case database through `WORKOUT_DB`.
 - Contract cases describe approved V1 behavior even when the current server fails them; harness unit tests and config validation must remain green.
+- Case metadata must cover the exact nine-skill set from the design spec; each case declares one primary `vblife-workout-*` skill.
 - No captured meal image, food identity, portion, USDA query, USDA response, or API credential may be persisted in fixtures, results, or baselines.
 - Node and npm dependency versions are committed through `package-lock.json`.
 
@@ -327,7 +328,7 @@ git commit -m "test: require subscription auth for workout evals"
 
 **Interfaces:**
 - Consumes: the target provider, fixture vars, and named assertion exports from Tasks 1-4.
-- Produces: 16 named contract cases; documented commands; a sanitized baseline containing only date, model, pass/fail/error counts, and failing case names.
+- Produces: 18 named contract cases covering all nine approved skills; documented commands; a sanitized baseline containing only date, model, pass/fail/error counts, and failing case names.
 
 - [ ] **Step 1: Extend the config test with the expected contract case names**
 
@@ -347,20 +348,52 @@ meal photo estimate requires confirmation before saving
 confirmed nutrition stores nutrient-only data
 rough workout calories use documented fallbacks
 first HIIT request offers approved defaults
+progressive overload uses server-backed workout history
 weekly report includes six-point workout trends
+open-ended analysis uses server facts and explains trends
 pain report stops the movement instead of logging it
 destructive session deletion asks for confirmation
 ```
+
+Also collect `metadata.skill` from every case and assert that the unique sorted values equal exactly:
+
+```text
+vblife-workout-analysis
+vblife-workout-daily-plan
+vblife-workout-hiit-session
+vblife-workout-log
+vblife-workout-nutrition
+vblife-workout-progressive-overload
+vblife-workout-report
+vblife-workout-routine
+vblife-workout-setup
+```
+
+Assert that every case has exactly one non-empty `metadata.skill` value beginning with `vblife-workout-`.
 
 - [ ] **Step 2: Run the test and verify the empty case file fails**
 
 Run: `npm run test:evals`
 
-Expected: FAIL because all 16 descriptions are absent.
+Expected: FAIL because all 18 descriptions and all nine skill metadata values are absent.
 
-- [ ] **Step 3: Add the 16 contract-first cases**
+- [ ] **Step 3: Add the 18 contract-first cases**
 
-For each case, set a concrete `userMessage` and at least one deterministic assertion. Use `calledTool`/`didNotCallTool` for trajectories, `sqliteQuery` for state, `noSensitiveNutritionPersistence` for nutrition privacy, and exact/regex output checks for confirmation language. Add an explicit Luna/max `agent-rubric` only to these four qualitative cases: repeatable setup, generated-plan ephemerality, rough-calorie disclosure, and pain response. The explicit grader configuration must repeat `model: gpt-6-luna`, `model_reasoning_effort: max`, `sandbox_mode: read-only`, `approval_policy: never`, `network_access_enabled: false`, and `web_search_mode: disabled`.
+For each case, set one primary skill in `metadata.skill`, a concrete `userMessage`, and at least one deterministic assertion. Use `calledTool`/`didNotCallTool` for trajectories, `sqliteQuery` for state, `noSensitiveNutritionPersistence` for nutrition privacy, and exact/regex output checks for confirmation language. The progressive-overload case is tagged `vblife-workout-progressive-overload`, supplies dated completed strength work, and requires the `suggest_next` tool plus a server-backed recommendation. The open-ended-analysis case is tagged `vblife-workout-analysis`, supplies dated mixed training, requires `query_stats` or `show_progress`, and requires an evidence-based trend explanation. Add an explicit Luna/max `agent-rubric` only to these four qualitative cases: repeatable setup, generated-plan ephemerality, rough-calorie disclosure, and pain response. The explicit grader configuration must repeat `model: gpt-6-luna`, `model_reasoning_effort: max`, `sandbox_mode: read-only`, `approval_policy: never`, `network_access_enabled: false`, and `web_search_mode: disabled`.
+
+Use this primary-skill coverage map:
+
+| Skill | Required primary case or cases |
+|---|---|
+| `vblife-workout-setup` | repeatable setup, including goals and proactive-reminder preference |
+| `vblife-workout-log` | quick logging, Chinese alias, unknown exercise, automatic lifecycle, rough calories, pain, and destructive confirmation |
+| `vblife-workout-daily-plan` | generated plan remains ephemeral |
+| `vblife-workout-progressive-overload` | server-backed progressive-overload recommendation |
+| `vblife-workout-hiit-session` | first-request defaults and exercise-name question |
+| `vblife-workout-routine` | create from completed workout and start an isolated snapshot |
+| `vblife-workout-nutrition` | pre-save confirmation and nutrient-only confirmed persistence |
+| `vblife-workout-report` | weekly six-point trends for all three requested metrics |
+| `vblife-workout-analysis` | open-ended, tool-grounded trend analysis |
 
 Use exact time-bearing prompts for lifecycle cases: `2026-10-12T08:00:00-07:00` for the first log and `2026-10-12T08:16:00-07:00` for the second. Use the approved HIIT values 40 seconds work, 20 seconds rest, 20 rounds, 10 seconds warm-up, and 60 seconds cooldown. The weekly report assertion must require six values each for training time, strength volume, and cardio duration. Nutrition confirmation must supply nutrient totals in the prompt and assert that no meal-identifying value is persisted.
 
@@ -386,7 +419,7 @@ Document that API-key variables must be unset, results are local and ignored, ev
 
 Run: `env -u OPENAI_API_KEY -u CODEX_API_KEY npm run eval:workout`
 
-Expected: Promptfoo starts 16 isolated Codex SDK cases using `gpt-6-luna` at `max`; the command may exit nonzero because unsupported V1 behaviors fail, but it must produce `evals/results/latest.json` without authentication, MCP-startup, or fixture-leak errors.
+Expected: Promptfoo starts 18 isolated Codex SDK cases using `gpt-6-luna` at `max`; the command may exit nonzero because unsupported V1 behaviors fail, but it must produce `evals/results/latest.json` without authentication, MCP-startup, or fixture-leak errors.
 
 - [ ] **Step 7: Record a sanitized initial baseline**
 
@@ -407,7 +440,7 @@ git commit -m "test: establish Workout Bot V1 eval baseline"
 
 ## Self-review record
 
-- Spec coverage: all Agent behavior evaluation requirements map to Tasks 1-5; the 16 cases sample every named agent domain while server calculation and schema exhaustiveness remain in the existing/future Python suites.
+- Spec coverage: all Agent behavior evaluation requirements map to Tasks 1-5; the 18 cases cover the exact nine-skill set while server calculation and schema exhaustiveness remain in the existing/future Python suites.
 - Placeholder scan: no TBD, TODO, “similar to,” or unspecified error-handling step remains.
 - Type consistency: `workoutDbPath` and `repoRoot` are produced in Task 2 and consumed by Tasks 1, 3, and 5; assertion export names match the Task 5 references; npm script names match Tasks 4-5 and documentation.
 - Review Focus: API-key leakage, fixture collision, missing V1 schema, dual tool-trace shapes, and baseline/harness status separation each have a named test task.

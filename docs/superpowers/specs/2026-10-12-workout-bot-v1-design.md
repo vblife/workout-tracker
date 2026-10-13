@@ -375,6 +375,8 @@ Promptfoo is the evaluation runner for agent behavior. The repository contains e
 
 The suite is contract-first. Every case expresses the approved Workout Bot V1 behavior, even when the current implementation does not yet satisfy it. Harness validation and fixture tests must pass independently, while the first live evaluation is preserved as an expected failing baseline that guides later implementation. Cases cover setup, quick logging, automatic workout lifecycle, routines, ephemeral plans, nutrition confirmation and privacy, goals, reports, reminders, HIIT preferences, Chinese exercise aliases, safety, and destructive-action confirmation.
 
+Every approved skill has at least one case whose metadata names that skill as its primary behavior under test: `vblife-workout-setup`, `vblife-workout-log`, `vblife-workout-daily-plan`, `vblife-workout-progressive-overload`, `vblife-workout-hiit-session`, `vblife-workout-routine`, `vblife-workout-nutrition`, `vblife-workout-report`, and `vblife-workout-analysis`. Harness tests compare the case metadata with this exact set so a renamed, removed, or newly added skill cannot silently lose eval coverage. Cross-cutting cases may exercise more than one skill but still declare one primary skill.
+
 The evaluated agent and every model-graded assertion use Promptfoo's `openai:codex-sdk` provider with the explicit model `gpt-6-luna` and `model_reasoning_effort: max`. Authentication reuses the local Codex ChatGPT-subscription login. Evaluation commands must fail fast when `OPENAI_API_KEY` or `CODEX_API_KEY` is present so a run cannot silently switch to API billing. No API key is stored in the repository.
 
 Each case receives an isolated temporary workspace and SQLite database. Promptfoo passes the database path to a local `workout-bot` stdio MCP server through Codex `cli_config.mcp_servers`; the server command, working directory, and environment are explicit. The Codex agent runs read-only, with approval disabled and network access disabled. Tests never read or write the developer's checked-in `workout.db` or the production data path.
@@ -425,6 +427,7 @@ The eval harness has three separate outcomes:
 Automated verification covers:
 
 - A single Promptfoo configuration named `workout-evals`, with no `current-smoke` or `v1-contract` configuration.
+- Exact metadata coverage for all nine approved `vblife-workout-*` skills, including dedicated progressive-overload and open-ended-analysis behaviors.
 - Codex SDK provider pinning to `gpt-6-luna` with `model_reasoning_effort: max` for both evaluated behavior and model-graded assertions.
 - ChatGPT-subscription authentication safeguards that reject `OPENAI_API_KEY` and `CODEX_API_KEY` before a live run.
 - Per-case temporary SQLite isolation, cleanup, read-only agent execution, disabled network access, and local stdio MCP configuration.
