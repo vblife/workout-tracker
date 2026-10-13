@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Workout Bot is a private, local-first fitness assistant for Grok Bot. It replaces the first-release workflows that matter from Vibrant Fitness with a conversational experience: quick workout and nutrition logging, saved agent-generated plans, daily/weekly/monthly goals, proactive coaching, configurable HIIT, progress insights, and readable report dashboards.
+Workout Bot is a private, local-first fitness assistant for Grok Bot. It replaces the first-release workflows that matter from Vibrant Fitness with a conversational experience: quick workout and nutrition logging, conversational workout planning, reusable workout routines, resumable active workouts, daily/weekly/monthly goals, proactive coaching, configurable HIIT, progress insights, and readable report dashboards.
 
 Each user receives an independent copy of the Bot and a private SQLite database on that user's Grok Bot computer. The first release starts fresh and does not import Vibrant Fitness data.
 
@@ -25,9 +25,11 @@ The database is isolated from other Grok Bot users. It is not a security boundar
 
 - Natural-language strength, bodyweight, cardio, hike, mobility, and HIIT logging.
 - English and Chinese exercise-name aliases, including user-taught aliases.
-- Quick conversational logging without a live workout-session screen.
+- Quick conversational logging plus one resumable active workout at a time, without requiring a live workout screen.
 - Deterministic PR, estimated one-rep max, progressive-overload, recovery, and planning calculations.
-- Persisted agent-generated workout plans and plan adherence.
+- Ephemeral agent-generated workout plans; starting one persists only an active-workout snapshot, never a plan record.
+- Reusable workout routines created from completed workouts on request.
+- Starting, resuming, pivoting, completing, or abandoning an active workout from a saved routine.
 - Daily, weekly, and monthly goals derived from workout records.
 - Optional body-weight history.
 - Calorie estimates with explicit confidence and assumptions.
@@ -38,14 +40,14 @@ The database is isolated from other Grok Bot users. It is not a security boundar
 - Daily, weekly, monthly, quarterly, annual, and all-time reports.
 - Interactive report, progress, and HIIT interfaces when the client supports MCP Apps.
 - Readable text and structured-data results when the client does not support MCP Apps.
-- Three proactive routines: daily plan, workout reminder, and weekly report.
+- Three proactive Grok Bot routines: daily plan, workout reminder, and weekly report.
 
 ### Deferred
 
 - Vibrant Fitness data migration or import.
 - Authentication or multi-user records inside one database.
-- Persistent live workout state, pause/resume, set timers, and rest timers.
-- Routine folders and a screen-oriented routine library.
+- A specialized live-workout screen, automatic set timers, and rest timers.
+- Workout-routine folders and a screen-oriented routine library.
 - Apple Health, steps, standing hours, or other health-platform integrations.
 - Exercise favorites, personal notes, instructional media, and social features.
 - Persistent meal photos, food names, portions, USDA queries, FDC identifiers, or a conventional item-level food diary.
@@ -57,7 +59,7 @@ The database is isolated from other Grok Bot users. It is not a security boundar
 
 ## Architecture
 
-The existing Python MCP server remains the system of record. The agent interprets natural language and meal images, gathers missing information, prepares nutrition drafts, and explains results. The server owns persistence, validation, normalization, aggregation, goal calculations, plan linkage, workout calorie estimates, optional USDA lookups, and all reported totals.
+The existing Python MCP server remains the system of record. The agent interprets natural language and meal images, gathers missing information, prepares ephemeral workout plans and nutrition drafts, and explains results. The server owns persistence, validation, normalization, aggregation, goal calculations, workout-routine snapshots, active-workout lifecycle, workout calorie estimates, optional USDA lookups, and all reported totals.
 
 ```text
 Grok Bot conversation
@@ -114,13 +116,23 @@ Each goal stores:
 
 Goal progress is derived from current workout and confirmed nutrition records in the user's configured timezone. Achievement history and streaks are recalculated from facts, so editing or deleting a workout or nutrition entry changes the result correctly. A direct user target always supersedes a bot recommendation for the same metric and effective period.
 
-### Workout plans
+### Workout routines
 
-A workout plan stores its date, title, focus, rationale, expected duration, status, and ordered items. Each item stores an exercise or activity, target sets, reps, weight, duration, distance, notes, and its link to completed work when available.
+`workout_routines` stores reusable templates with an identifier, user-visible name, optional description, estimated duration, active or archived state, optional source workout identifier, and timestamps. `workout_routine_items` stores each routine's ordered exercise or activity plus target sets, reps, weight, duration, distance, and notes.
 
-Plan statuses are `planned`, `started`, `completed`, `partial`, `skipped`, and `replaced`. Check-ins record status transitions and timestamps. Reports calculate adherence from those records and completed plan items.
+A routine is created only when the user explicitly asks to save a completed workout as a routine or explicitly creates one through the routine flow. Creating from a completed workout copies normalized exercises and actual work into editable targets, presents the proposed routine for confirmation, and records the source workout after saving. The completed workout remains unchanged.
 
-When a user logs work and there is an active plan for that local date, the server links it only when the exercise or activity match is unambiguous. An ambiguous match remains unlinked until the agent confirms it.
+Routine edits affect future starts only. A referenced routine is archived instead of hard-deleted so historical workout links remain valid.
+
+### Active workouts and routine snapshots
+
+The existing `sessions` table gains `in_progress`, `completed`, and `abandoned` lifecycle states, nullable `source_routine_id`, and consistent `started_at` and `ended_at` handling. Existing historical sessions migrate as `completed`.
+
+Starting a saved routine transactionally creates an `in_progress` workout and copies its ordered items into `workout_session_items`. These session items are an independent snapshot of the routine targets, not a stored workout plan. Starting an accepted conversational plan uses the same session-item snapshot with no source routine. Merely generating or viewing a plan writes nothing.
+
+Only one workout may be `in_progress`. Its session items support `pending`, `completed`, `skipped`, and `replaced` states. The user may add ad-hoc session items, replace or reorder exercises, or log different sets while training. These changes affect only the active workout; the source routine changes only after a separate explicit update request.
+
+Actual sets and activities link to the active workout and, when applicable, its session item. Resuming returns the snapshot, completed work, and next unfinished item. Finishing records the actual result and calculates derived statistics. Abandoning preserves the session as `abandoned` until the user explicitly deletes it.
 
 ### Body weight
 
@@ -133,7 +145,7 @@ Every eligible session may store estimated calories, confidence, the weight and 
 Input priority is:
 
 1. Weight: value supplied for the session, then latest recorded body weight, then a documented 70 kg fallback.
-2. Duration: explicit duration, completed HIIT elapsed time, saved plan duration, timestamp span, then a conservative set-count heuristic.
+2. Duration: explicit duration, completed HIIT elapsed time, active-workout timestamp span, source-routine estimated duration, then a conservative set-count heuristic.
 3. Intensity: activity type and recorded RPE when available, then a conservative default for the session type.
 
 The server uses a versioned MET-based formula. Confidence is `higher`, `moderate`, or `rough`. Reports show calorie totals alongside confidence coverage and never imply that a rough or partial estimate is measured data. Editing weight, duration, RPE, or workout contents recalculates the affected estimate.
@@ -182,14 +194,22 @@ New or extended responsibilities are grouped as follows:
 - Remove or deactivate a goal.
 - Calculate progress, achievement, and streaks for a requested period and anchor date.
 
-### Plans
+### Workout routines
 
-- Save a complete agent-generated plan.
-- Fetch a plan by identifier or local date.
-- List recent plans.
-- Change plan status through valid transitions.
-- Link or unlink completed work.
-- Return plan adherence for reporting.
+- Create a routine directly or propose one from a completed workout.
+- Retrieve and list active or archived routines.
+- Edit routine metadata, ordering, and targets.
+- Archive or restore a routine without breaking historical workout links.
+- Start an active workout from a routine using a transactional snapshot.
+
+### Active workouts
+
+- Start an accepted conversational plan as an active workout without creating a plan record.
+- Retrieve and resume the one active workout.
+- Add, replace, reorder, skip, or complete session items without modifying a source routine.
+- Log, edit, or remove actual sets and activities against the active session.
+- Finish or abandon the active workout through valid state transitions.
+- Return completed-workout provenance through nullable `source_routine_id`.
 
 ### Body weight and calories
 
@@ -213,7 +233,7 @@ The server treats the USDA API as optional and failure-prone. Missing keys, time
 
 - Add `day` to the existing report periods.
 - Preserve `week`, `month`, `quarter`, `year`, and `all` periods.
-- Return workout totals, nutrition totals, comparison values, goals, streaks, plan adherence, PRs, workout mix, lift progress, calorie-confidence coverage, nutrition-estimate confidence, and chart-ready time series.
+- Return workout totals, nutrition totals, comparison values, goals, streaks, routine usage, PRs, workout mix, lift progress, calorie-confidence coverage, nutrition-estimate confidence, and chart-ready time series.
 
 ## Conversational flows
 
@@ -223,11 +243,19 @@ Setup is not a one-time gate. On first use it collects only required missing val
 
 ### Quick logging
 
-Users report completed work naturally. The agent parses it into tool arguments and logs before replying. Planned work is never marked complete merely because it was suggested. Unknown exercises require confirmation and may then be saved as aliases or new exercises.
+Users report completed work naturally. If a workout is active, new sets and activities default to that session; otherwise, the agent records a completed workout directly. Suggested work is never marked complete merely because it was proposed. Unknown exercises require confirmation and may then be saved as aliases or new exercises.
 
-### Saved workout plans
+### Conversational plans
 
-The agent reads current settings, recent work, recovery, goals, available equipment, and active plans before planning. It saves the plan before presenting it. A user can later start today's plan, replace it, skip it, or log work against it. Reports distinguish completed, partial, skipped, and replaced plans.
+The agent reads current settings, recent work, recovery, goals, available equipment, saved routines, and any active workout before planning. The proposed plan remains in conversation and is not written to SQLite. The user may follow it, change it, or ignore it.
+
+If the user starts the proposed plan, the server creates an active workout and snapshots the accepted items into `workout_session_items`; it still does not create a plan record. Later pivots alter only the active workout. If the user never starts it, no plan data remains in the database.
+
+### Saved routines and active workouts
+
+When requested, the agent proposes a reusable routine from a completed workout, lets the user name or edit it, and saves it only after confirmation. The user can list, inspect, edit, archive, restore, or start a saved routine.
+
+Starting a routine creates the active-workout snapshot. Starting another workout while one is active does not replace it silently; the agent asks the user to resume, finish, or abandon the existing workout first. Resuming shows completed work and the next pending item. The user can pivot conversationally, and the source routine remains unchanged unless the user explicitly asks to update it.
 
 ### Image-first nutrition logging
 
@@ -273,7 +301,7 @@ The timer accepts any ordered list of named work and rest segments, displays the
 6. Estimate confidence and coverage, kept separate for workout calories and nutrition entries.
 7. Switchable workout trends.
 8. Workout mix.
-9. PRs, streaks, plan adherence, nutrition goal adherence, and actionable next steps.
+9. PRs, streaks, routine usage, nutrition goal adherence, and actionable next steps.
 
 Trend windows are:
 
@@ -294,31 +322,32 @@ All skill directories, YAML names, references, documentation, and routine prompt
 | Responsibility | Skill name |
 |---|---|
 | Setup and preference changes | `vblife-workout-setup` |
-| Quick logging and corrections | `vblife-workout-log` |
-| Saved daily planning | `vblife-workout-daily-plan` |
+| Quick logging, active-workout lifecycle, and corrections | `vblife-workout-log` |
+| Ephemeral daily planning and starting an accepted plan | `vblife-workout-daily-plan` |
 | Progressive overload | `vblife-workout-progressive-overload` |
 | HIIT preferences and timer | `vblife-workout-hiit-session` |
+| Saved workout routines and starting from a routine | `vblife-workout-routine` |
 | Meal-photo estimation, confirmation, and nutrition goals | `vblife-workout-nutrition` |
 | Period reports and dashboards | `vblife-workout-report` |
 | Open-ended trend analysis | `vblife-workout-analysis` |
 
 Every skill file is written entirely in English and contains no Chinese characters. Chinese exercise-name support remains in alias seed data, normalization behavior, and automated tests. The agent accepts user input in either language and may respond in the user's language.
 
-## Default routines
+## Default Grok Bot routines
 
-The template provisions only these routines, enabled after setup establishes the user's timezone and schedule:
+These are scheduled Grok Bot automations, distinct from user-created workout routines. The template provisions only the following automations after setup establishes the user's timezone and schedule:
 
 - Daily plan: 07:00 local time each day; remains quiet on a planned rest day except for the rest/recovery recommendation.
-- Workout reminder: 17:00 local time on preferred training days; remains quiet when the day's planned or equivalent workout is already complete.
+- Workout reminder: 17:00 local time on preferred training days; remains quiet when a workout is active or the day's workout is already complete.
 - Weekly report: Sunday at 20:00 local time.
 
-Users may edit, pause, or delete each routine. Monthly and annual reports are available on demand and are not scheduled by default.
+Users may edit, pause, or delete each scheduled automation. Monthly and annual reports are available on demand and are not scheduled by default.
 
 ## Documentation
 
-`AGENT.md` describes Workout Bot's role, tool-use rules, safety boundaries, plan persistence, nutrition confirmation and privacy rules, numeric accuracy, language behavior, capability fallback, and the three routines.
+`AGENT.md` describes Workout Bot's role, tool-use rules, safety boundaries, ephemeral planning, workout-routine persistence, active-workout lifecycle, nutrition confirmation and privacy rules, numeric accuracy, language behavior, capability fallback, and the three scheduled Grok Bot routines.
 
-`README.md` documents the product, exact installation and data paths, stdio command, environment overrides, `USDA_FDC_API_KEY` setup with the official free-key link, model-only fallback, directory layout, MCP Apps negotiation, test commands, routine defaults, and privacy boundary.
+`README.md` documents the product, exact installation and data paths, stdio command, environment overrides, `USDA_FDC_API_KEY` setup with the official free-key link, model-only fallback, directory layout, MCP Apps negotiation, test commands, workout-routine and active-workout commands, scheduled-automation defaults, and privacy boundary.
 
 The old `workout-tracker` product name, Charles-specific wording, obsolete `/home/box/workout` paths, stale skill identifiers, and recommendations for extra default routines are removed from user-facing and agent-facing documentation.
 
@@ -335,7 +364,10 @@ The old `workout-tracker` product name, Charles-specific wording, obsolete `/hom
 - Database migrations are ordered, versioned, transactional, and preserve existing repository test data.
 - Unknown or ambiguous exercise names are never silently mapped.
 - Destructive multi-record operations require confirmation; single-set undo remains direct.
-- Plan linkage never guesses across ambiguous exercises or multiple active plans.
+- Starting a routine or accepted conversational plan is transactional and idempotent, so retries cannot create duplicate active workouts.
+- The database enforces at most one `in_progress` workout. A second start never silently replaces the active workout.
+- Routine snapshots are isolated from later routine edits, and active-workout pivots never mutate the source routine without a separate explicit request.
+- Referenced routines are archived rather than hard-deleted, preserving historical `source_routine_id` links.
 - Repeated HIIT completion callbacks are idempotent.
 - All reported numbers come from server results.
 - Pain or injury reports cause the agent to recommend stopping the movement and seeking qualified help rather than pushing through.
@@ -355,7 +387,11 @@ Automated verification covers:
 - Schema migration from the current database version and clean database creation.
 - Goal calculations across day, week, and month boundaries in the configured timezone.
 - Goal edits, deleted workouts, and streak recalculation.
-- Saved plan creation, valid status transitions, automatic unambiguous linkage, ambiguous linkage, and adherence.
+- Workout-routine creation from a completed workout, direct creation, editing, ordering, archiving, restoring, and historical source links.
+- Active-workout creation from a routine snapshot and from an accepted conversational plan without any persisted plan record.
+- Single-active-workout enforcement, idempotent start, resume, valid state transitions, incremental set logging, pivots, finish, abandon, and explicit deletion.
+- Snapshot isolation when a routine changes, plus the rule that active-workout changes do not update a routine without an explicit request.
+- Migration of historical workouts to `completed` and schema checks for `workout_routines`, `workout_routine_items`, and `workout_session_items`.
 - Body-weight history, normalized units, calorie input priority, fallback assumptions, confidence, and recalculation.
 - Clean creation and migration of `nutrition_entries` and nutrition-goal fields inside `/workspace/vblife/workout-data/workout.db`, with no separate database.
 - Nutrition-draft validation, explicit-confirmation enforcement, correction, cancellation, update, deletion, aggregation, and timezone boundaries.
@@ -367,7 +403,7 @@ Automated verification covers:
 - Weekly six-point, monthly six-point, and annual twelve-point series for training time, strength volume, and cardio duration.
 - Capability negotiation with supporting and non-supporting clients.
 - HIIT defaults, one-session overrides, saved-default replacement, idempotent completion, and arbitrary segment lists.
-- Renamed skill discovery and cross-references, including `vblife-workout-nutrition`.
+- Renamed skill discovery and cross-references, including `vblife-workout-routine` and `vblife-workout-nutrition`.
 - An automated scan proving every `skills/*/SKILL.md` contains no Chinese characters.
 - Full unit and stdio end-to-end suites.
 - Visual rendering of report, progress, and HIIT resources in light/dark themes at narrow and desktop widths.
@@ -376,7 +412,8 @@ Automated verification covers:
 
 - The product is named Workout Bot and the MCP server identifies as `workout-bot`.
 - The installed code and durable database use the exact approved paths.
-- A new user can finish repeatable setup, log work conversationally, receive and save a plan, and see plan adherence.
+- A new user can finish repeatable setup, receive an ephemeral plan, start it as a resumable workout, pivot, and finish or abandon it without creating a plan record.
+- A user can create a reusable routine from a completed workout on request and start, resume, or pivot from a saved routine.
 - Users can create daily, weekly, and monthly workout-derived goals and receive correct progress and streaks.
 - Calories are estimated for eligible sessions even when inputs require documented fallbacks, with transparent confidence and assumptions.
 - A user can upload a meal image, review and correct the estimate, and save it only after explicit confirmation.
@@ -387,6 +424,6 @@ Automated verification covers:
 - Weekly, monthly, and annual dashboards show comprehensive totals and all three requested trends.
 - HIIT uses the approved defaults, supports arbitrary exercises and timings, and can be changed temporarily or permanently.
 - MCP Apps are capability-gated, and non-supporting clients remain fully usable through text and structured data.
-- Only the daily-plan, workout-reminder, and weekly-report routines are provisioned by default.
+- Only the daily-plan, workout-reminder, and weekly-report Grok Bot automations are provisioned by default.
 - Every renamed skill is English-only while Chinese aliases continue to resolve correctly.
 - The full automated test suite passes and the three interfaces pass visual inspection.
