@@ -14,7 +14,7 @@ SETTING_KEYS={"unit":str,"days_per_week":int,"goals":list,"preferred_days":list,
   "experience":str,"equipment":list,"timezone":str,"bodyweight":float,"injuries":str,"constraints":str,
   "rep_range_default":str,"onboarded_at":str,"reminders_enabled":bool,"daily_plan_enabled":bool,
   "workout_reminder_enabled":bool,"weekly_report_enabled":bool,"hiit_defaults":dict,
-  "model_only_acknowledged":bool,"nutrition_profile":dict,"fallback_base_url":str}
+  "model_only_acknowledged":bool,"nutrition_profile":dict}
 ONBOARDING_REQUIRED=()
 
 class UserError(Exception): pass
@@ -43,7 +43,6 @@ def update_settings(c,settings):
     if not isinstance(v,typ) or (typ is not bool and isinstance(v,bool)): raise UserError(f"setting '{k}' must be {typ.__name__}")
     if k=="unit" and v not in("lb","kg"): raise UserError("unit must be 'lb' or 'kg'")
     if k=="days_per_week" and not 1<=v<=7: raise UserError("days_per_week must be 1-7")
-    if k=="fallback_base_url" and not v.startswith("https://"): raise UserError("fallback_base_url must be https://")
     if k=="rep_range_default":
       import re
       if not re.fullmatch(r"\d{1,2}-\d{1,2}",v): raise UserError("rep_range_default must look like 8-12")

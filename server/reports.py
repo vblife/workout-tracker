@@ -2,11 +2,13 @@
 import json
 from datetime import datetime,date,timedelta,timezone
 import core
+import workouts,goals
 from core import UserError,TZ,_local,_iso,_parse_time,to_unit,display_unit,get_settings,MI,FT
-PERIODS=("week","month","quarter","year","all")
+PERIODS=("day","week","month","quarter","year","all")
 def period_bounds(period,anchor):
   d=anchor
-  if period=="week": a=d-timedelta(days=d.weekday()); b=a+timedelta(days=7)
+  if period=="day": a=d; b=d+timedelta(days=1)
+  elif period=="week": a=d-timedelta(days=d.weekday()); b=a+timedelta(days=7)
   elif period=="month": a=d.replace(day=1); b=(a+timedelta(days=32)).replace(day=1)
   elif period=="quarter": a=date(d.year,3*((d.month-1)//3)+1,1); b=(a+timedelta(days=95)).replace(day=1)
   elif period=="year": a=date(d.year,1,1); b=date(d.year+1,1,1)
@@ -15,6 +17,7 @@ def period_bounds(period,anchor):
 def prev_bounds(period,a):
   return period_bounds(period,a-timedelta(days=1))
 def label(period,a,b):
+  if period=="day": return a.isoformat()
   if period=="week": return f"{a.isoformat()} – {(b-timedelta(days=1)).isoformat()}"
   if period=="month": return a.strftime("%Y-%m")
   if period=="quarter": return f"{a.year} Q{(a.month-1)//3+1}"
@@ -24,7 +27,8 @@ def U(d): return _iso(datetime.combine(d,datetime.min.time(),TZ))
 
 def _all_sets(c):
   return c.execute("""SELECT x.*,e.canonical_name,e.name_zh,e.category,e.muscle_groups,e.tracking FROM sets x
-    JOIN exercises e ON e.id=x.exercise_id ORDER BY x.performed_at,x.id""").fetchall()
+    JOIN exercises e ON e.id=x.exercise_id JOIN sessions s ON s.id=x.session_id
+    WHERE s.status='completed' ORDER BY x.performed_at,x.id""").fetchall()
 def _pr_flags(rows):
   best={}; flags={}
   for r in rows:
@@ -49,7 +53,10 @@ def _summ(c,rows,sessions,unit,a=None,b=None):
   types={}
   for s in S: types[s["type"] or "other"]=types.get(s["type"] or "other",0)+1
   dist=lambda k:round(k/MI,1) if imperial else round(k,1)
+  training_min=sum(s["duration_min"] or s["calorie_duration_min"] or 0 for s in S)
+  calories=sum(s["estimated_calories"] or 0 for s in S)
   return {"days_trained":len(days),"sessions":len(S),"sessions_by_type":types,"sets":len(R),"reps":sum(r["reps"] or 0 for r in R),
+    "training_minutes":round(training_min),"estimated_calories":round(calories),
     "volume":to_unit(vol,unit),"cardio_minutes":round(cardio_min),"distance":dist(km),
     "hikes":len(hk),"hike_distance":dist(sum(s["distance_km"] or 0 for s in hk)),
     "hike_elevation":round(sum(s["elevation_gain_m"] or 0 for s in hk)/(FT if imperial else 1)),
@@ -92,11 +99,52 @@ def _lift_progress(rows,unit,a,b,n=6):
     out.append({"exercise":name,"sets":len(rs),"e1rm_start":to_unit(e0,unit),"e1rm_end":to_unit(e1,unit),"e1rm_change_pct":round(100*(e1-e0)/e0,1) if e0 else None,
       "best_set":{"weight":to_unit(best["weight_kg"],unit),"reps":best["reps"],"e1rm":to_unit(best["e1rm_kg"],unit),"date":_local(best["performed_at"]).date().isoformat()},"plateau_4w":plateau})
   return out
+def _month_shift(d,delta):
+  index=d.year*12+d.month-1+delta
+  return date(index//12,index%12+1,1)
+
+def _trend_bounds(period,anchor):
+  if period=="day":
+    return "day",[(anchor-timedelta(days=i),anchor-timedelta(days=i)+timedelta(days=1)) for i in range(27,-1,-1)]
+  if period=="week":
+    current=anchor-timedelta(days=anchor.weekday())
+    return "week",[(current-timedelta(weeks=i),current-timedelta(weeks=i-1)) for i in range(5,-1,-1)]
+  if period=="month":
+    current=anchor.replace(day=1)
+    return "month",[(_month_shift(current,-i),_month_shift(current,-i+1)) for i in range(5,-1,-1)]
+  if period=="year":
+    return "month",[(date(anchor.year,m,1),date(anchor.year+1,1,1) if m==12 else date(anchor.year,m+1,1)) for m in range(1,13)]
+  a,b=period_bounds(period,anchor) if period!="all" else (anchor-timedelta(days=365),anchor+timedelta(days=1))
+  return ("week" if period=="quarter" else "month"),[(a,b)]
+
+def _trend(c,period,anchor,unit):
+  group,bounds=_trend_bounds(period,anchor); points=[]
+  for a,b in bounds:
+    sessions=c.execute("SELECT * FROM sessions WHERE status='completed' AND started_at>=? AND started_at<?",(U(a),U(b))).fetchall()
+    volume=c.execute("""SELECT coalesce(sum(x.weight_kg*x.reps),0) FROM sets x JOIN sessions s ON s.id=x.session_id
+      WHERE s.status='completed' AND x.is_warmup=0 AND x.performed_at>=? AND x.performed_at<?""",(U(a),U(b))).fetchone()[0]
+    training=sum(x["duration_min"] or x["calorie_duration_min"] or 0 for x in sessions)
+    cardio=sum(x["duration_min"] or 0 for x in sessions if x["type"] in ("cardio","hike","hiit"))
+    points.append({"period":a.isoformat() if group!="month" else a.strftime("%Y-%m"),"training_minutes":round(training,1),
+      "strength_volume":to_unit(volume,unit),"cardio_minutes":round(cardio,1)})
+  return {"group_by":group,"points":points}
+
+def _nutrition(c,period,a,b):
+  rows=c.execute("SELECT * FROM nutrition_entries WHERE local_date>=? AND local_date<? ORDER BY local_date",(a.isoformat(),b.isoformat())).fetchall()
+  out={"entries":len(rows),"days_with_entries":len({r["local_date"] for r in rows})}
+  for field in ("calories_kcal","protein_g","carbohydrates_g","fat_g","fiber_g","saturated_fat_g","sugar_g","sodium_mg"):
+    values=[r[field] for r in rows if r[field] is not None]
+    out[field]=round(sum(values),1) if values else None
+    if period!="day": out[field+"_daily_average"]=round(sum(values)/out["days_with_entries"],1) if values and out["days_with_entries"] else None
+  out["confidence"]={level:sum(1 for r in rows if r["confidence"]==level) for level in ("higher","moderate","rough")}
+  return out
+
 def report(c,period="week",anchor_date=None,now=None):
-  if period not in PERIODS: raise UserError("period must be week|month|quarter|year|all")
+  if period not in PERIODS: raise UserError("period must be day|week|month|quarter|year|all")
   unit=display_unit(c); s=get_settings(c); target=s.get("days_per_week") or 4
   now=now or datetime.now(timezone.utc); anchor=date.fromisoformat(anchor_date) if anchor_date else now.astimezone(TZ).date()
-  rows=_all_sets(c); sessions=c.execute("SELECT * FROM sessions ORDER BY started_at").fetchall()
+  workouts.reconcile_active(c,now)
+  rows=_all_sets(c); sessions=c.execute("SELECT * FROM sessions WHERE status='completed' ORDER BY started_at").fetchall()
   if period=="all":
     first=min([_local(x["started_at"]).date() for x in sessions],default=anchor)
     a,b=first,anchor+timedelta(days=1); pa=pb=None
@@ -104,6 +152,18 @@ def report(c,period="week",anchor_date=None,now=None):
   cur=_summ(c,rows,sessions,unit,a,b); days=cur.pop("_days")
   out={"period":period,"label":label(period,a,b),"start":a.isoformat(),"end_exclusive":b.isoformat(),"unit":unit,
        "distance_unit":"mi" if unit=="lb" else "km","elevation_unit":"ft" if unit=="lb" else "m","target_days_per_week":target,"summary":cur}
+  out["active_workout"]=workouts.get_active(c,now)["active_workout"]
+  out["nutrition"]=_nutrition(c,period,a,b)
+  out["trend_series"]=_trend(c,period,anchor,unit)
+  out["goal_progress"]=[]
+  for goal in goals.list_goals(c)["goals"]:
+    try: out["goal_progress"].append(goals.goal_progress(c,goal["goal_id"],anchor.isoformat()))
+    except UserError: pass
+  out["routine_usage"]=[{"routine_id":r["source_routine_id"],"name":r["name"],"sessions":r["n"]} for r in c.execute("""SELECT s.source_routine_id,r.name,count(*) n FROM sessions s JOIN workout_routines r ON r.id=s.source_routine_id
+    WHERE s.status='completed' AND s.started_at>=? AND s.started_at<? GROUP BY s.source_routine_id,r.name ORDER BY n DESC""",(U(a),U(b)))]
+  coverage=c.execute("""SELECT count(*) total,sum(CASE WHEN estimated_calories IS NOT NULL THEN 1 ELSE 0 END) estimated,
+    sum(CASE WHEN calorie_confidence='rough' THEN 1 ELSE 0 END) rough FROM sessions WHERE status='completed' AND started_at>=? AND started_at<?""",(U(a),U(b))).fetchone()
+  out["calorie_confidence_coverage"]={"sessions":coverage["total"],"estimated":coverage["estimated"] or 0,"rough":coverage["rough"] or 0}
   if pa:
     prev=_summ(c,rows,sessions,unit,pa,pb); prev.pop("_days"); out["vs_previous"]={"label":label(period,pa,pb),**_delta(cur,prev)}
   first_any=min([_local(x["started_at"]).date() for x in sessions],default=a)
@@ -149,6 +209,7 @@ def _highlights(r):
 RANGES={"4w":28,"12w":84,"6m":183,"1y":365}
 def show_progress(c,exercise=None,metric=None,range="12w",now=None):
   now=now or datetime.now(timezone.utc); unit=display_unit(c)
+  workouts.reconcile_active(c,now)
   if range not in(*RANGES,"all"): raise UserError("range must be 4w|12w|6m|1y|all")
   frm=None if range=="all" else (now.astimezone(TZ).date()-timedelta(days=RANGES[range])).isoformat()
   gb="day" if range=="4w" else "week" if range in("12w","6m") else "month"

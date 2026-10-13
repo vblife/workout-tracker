@@ -1,7 +1,7 @@
 import os,sys,tempfile,shutil,unittest
 from datetime import datetime,timezone,timedelta
 sys.path.insert(0,os.path.join(os.path.dirname(__file__),".."))
-import db as dbm, core, coach, reports, fallback
+import db as dbm, core, coach, reports
 NOW=datetime(2026,10,9,20,0,tzinfo=timezone.utc)   # Fri Oct 9 2026 13:00 PT
 def L(c,ex,reps,w,day,n=3,unit="lb",rpe=None):
   return core.log_sets(c,[{"exercise":ex,"reps":r,"weight":w,"unit":unit,"rpe":rpe} for r in (reps if isinstance(reps,list) else [reps]*n)],performed_at=day+"T08:00:00")
@@ -62,14 +62,4 @@ class T(unittest.TestCase):
     for i,w in enumerate((100,105,110,115)): L(s.c,"squat",8,w,(datetime(2026,9,14)+timedelta(days=7*i)).date().isoformat())
     p=reports.show_progress(s.c,"squat",range="12w",now=NOW); s.assertEqual(len(p["points"]),4); s.assertEqual(p["stats"]["change_pct"],15.0); s.assertEqual(len(p["prs"]),4)
     o=reports.show_progress(s.c,metric="days",range="12w",now=NOW); s.assertEqual(o["stats"]["total"],4)
-  # ---- fallback links ----
-  def test_fallback(s):
-    s.assertIsNone(fallback.link(s.c,"hiit",{"a":1}))
-    with s.assertRaises(core.UserError): core.update_settings(s.c,{"fallback_base_url":"http://x"})
-    core.update_settings(s.c,{"fallback_base_url":"https://cyzhao.github.io/workout-ui/"})
-    h=core.create_hiit(s.c,name="Tabata 中文",rounds=8,segments=[{"kind":"work","seconds":20,"exercise":"波比跳"},{"kind":"rest","seconds":10}])
-    u=fallback.link(s.c,"hiit",h); s.assertTrue(u.startswith("https://cyzhao.github.io/workout-ui/hiit.html#"))
-    s.assertEqual(fallback.decode(u.split("#",1)[1])["segments"][0]["exercise"],"波比跳")
-    for i in range(60): core.log_sets(s.c,[{"exercise":"squat","reps":8,"weight":100+i}],performed_at=(datetime(2025,1,1)+timedelta(days=6*i)).date().isoformat()+"T08:00:00")
-    u=fallback.link(s.c,"charts",reports.report(s.c,"all",now=NOW)); s.assertLessEqual(len(u),14000)
 if __name__=="__main__": unittest.main(verbosity=2)

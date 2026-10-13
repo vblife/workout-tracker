@@ -2,17 +2,17 @@
 """Workout Tracking MCP server (Python stdlib only). Usage: server.py --stdio [--db PATH]   (env WORKOUT_DB also honored)"""
 import json,sys,os,traceback
 sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
-import db as dbm, core, coach, reports, fallback, workouts, routines, goals, profile, nutrition
+import db as dbm, core, coach, reports, workouts, routines, goals, profile, nutrition
 from core import UserError
 HERE=os.path.dirname(os.path.abspath(__file__))
 NAME,VERSION="workout-bot","1.0.0"
 MIME="text/html;profile=mcp-app"; HIIT_URI="ui://workout/hiit.html"
 RMETA={"ui":{"prefersBorder":True,"csp":{"connectDomains":[],"resourceDomains":[]}},"openai/widgetDescription":"Configurable HIIT interval timer","openai/widgetPrefersBorder":True}
 PROG_URI="ui://workout/progress.html"; REPORT_URI="ui://workout/report.html"
-UI_FILES={HIIT_URI:"hiit.html",PROG_URI:"charts.html",REPORT_URI:"charts.html"}
-FALLBACK_PAGE={"hiit_timer":"hiit","show_progress":"charts","report":"charts"}
+UI_FILES={HIIT_URI:"hiit.html",PROG_URI:"progress.html",REPORT_URI:"report.html"}
 TOOL_UI={"hiit_timer":HIIT_URI,"show_progress":PROG_URI,"report":REPORT_URI}
-def _ui_html(uri): return open(os.path.join(HERE,"ui",UI_FILES[uri]),encoding="utf-8").read()
+def _ui_html(uri):
+  with open(os.path.join(HERE,"ui",UI_FILES[uri]),encoding="utf-8") as handle: return handle.read()
 def _uimeta(uri,inv,done): return {"ui":{"resourceUri":uri,"visibility":["model","app"]},"ui/resourceUri":uri,"openai/outputTemplate":uri,"openai/widgetAccessible":True,
   "openai/toolInvocation/invoking":inv,"openai/toolInvocation/invoked":done}
 O=lambda props,req=(): {"type":"object","properties":props,"required":list(req),"additionalProperties":False}
@@ -63,10 +63,10 @@ TOOLS=[
   "inputSchema":O({"exercise":{"type":"string"},"target_rep_range":{"type":"string","description":"e.g. '5-8'; default settings.rep_range_default or 8-12"},"sets":{"type":"integer","minimum":1,"maximum":10}},["exercise"]),"annotations":{"readOnlyHint":True}},
  {"name":"daily_plan_context","title":"Daily plan context","description":"Facts for composing today's workout: week progress vs target, muscle-group recovery (48h), cardio minutes vs last week (≤10% growth cap), hikes, a rule-based suggested_focus (upper|lower|full_body|cardio_hiit|hike|rest_or_mobility|optional_light) with rationale, and candidate exercises with suggest_next prescriptions. Handles unknown equipment (marks equipment_status=unknown).",
   "inputSchema":O({"date":{"type":"string","description":"YYYY-MM-DD local; default today"}}),"annotations":{"readOnlyHint":True}},
- {"name":"report","title":"Workout report","description":"Weekly/monthly/quarterly/annual/all-time report: summary, vs previous period, adherence (weeks meeting target, streaks), PRs, main-lift e1RM change & plateaus, chart series, milestones (all). Renders a report UI; also returns fallback_url for clients without MCP Apps (show it to the user on mobile).",
-  "inputSchema":O({"period":{"type":"string","enum":["week","month","quarter","year","all"]},"anchor_date":{"type":"string","description":"YYYY-MM-DD inside the period; default today"}},["period"]),
+ {"name":"report","title":"Workout report","description":"Daily/weekly/monthly/quarterly/annual/all-time report with workout and nutrition totals, goals, confidence, comparison, and fixed trend series. Always summarize the structured results in text; a dashboard is attached only on compatible MCP Apps clients.",
+  "inputSchema":O({"period":{"type":"string","enum":["day","week","month","quarter","year","all"]},"anchor_date":{"type":"string","description":"YYYY-MM-DD inside the period; default today"}},["period"]),
   "annotations":{"readOnlyHint":True},"_meta":_uimeta(REPORT_URI,"Building report…","Report ready")},
- {"name":"show_progress","title":"Show progress chart","description":"Chart progress for one exercise (metric e1rm|volume|best_set|reps) or overall (volume|sets|days|cardio_minutes) over range 4w|12w|6m|1y|all. Renders a chart UI; returns fallback_url for mobile.",
+ {"name":"show_progress","title":"Show progress chart","description":"Chart progress for one exercise or overall training. Complete structured data is returned on every client; a chart is attached only on compatible MCP Apps clients.",
   "inputSchema":O({"exercise":{"type":"string"},"metric":{"type":"string","enum":["e1rm","volume","best_set","reps","sets","days","cardio_minutes"]},"range":{"type":"string","enum":["4w","12w","6m","1y","all"],"default":"12w"}}),
   "annotations":{"readOnlyHint":True},"_meta":_uimeta(PROG_URI,"Drawing chart…","Chart ready")},
 ]
@@ -174,22 +174,31 @@ def call_tool(c,name,a):
   raise KeyError(f"unknown tool: {name}")
 
 class Server:
-  def __init__(s,db_path=None): s.c=dbm.connect(db_path)
+  def __init__(s,db_path=None): s.c=dbm.connect(db_path); s.ui_supported=False
   def handle(s,m):
     meth=m.get("method"); p=m.get("params") or {}
     workouts.reconcile_active(s.c)
     if meth=="initialize":
       pv=p.get("protocolVersion")
+      cc=p.get("capabilities") or {}; ext=cc.get("extensions") or cc.get("experimental") or {}
+      s.ui_supported="io.modelcontextprotocol/ui" in ext
+      caps={"tools":{"listChanged":False}}
+      if s.ui_supported: caps.update({"resources":{"listChanged":False},"extensions":{"io.modelcontextprotocol/ui":{"mimeTypes":[MIME]}}})
       return {"protocolVersion":pv if pv in("2024-11-05","2025-03-26","2025-06-18","2025-11-25") else "2025-06-18",
-        "capabilities":{"tools":{"listChanged":False},"resources":{"listChanged":False},"extensions":{"io.modelcontextprotocol/ui":{"mimeTypes":[MIME]}}},
+        "capabilities":caps,
         "serverInfo":{"name":NAME,"version":VERSION},
         "instructions":"Workout Bot is a private local fitness assistant. Use tools for authoritative writes and numbers. Setup is optional and repeatable; never block logging, planning, reports, or coaching on missing preferences. Automatically log completed work, never log a proposed set as completed, confirm unknown exercises, and require explicit confirmation before saving nutrient-only nutrition drafts or destructive multi-record changes."}
     if meth=="ping": return {}
-    if meth=="tools/list": return {"tools":TOOLS}
-    if meth=="resources/list": return {"resources":RESOURCES}
+    if meth=="tools/list":
+      tools=json.loads(json.dumps(TOOLS))
+      if not s.ui_supported:
+        for tool in tools: tool.pop("_meta",None)
+      return {"tools":tools}
+    if meth=="resources/list": return {"resources":RESOURCES if s.ui_supported else []}
     if meth=="resources/templates/list": return {"resourceTemplates":[]}
     if meth=="prompts/list": return {"prompts":[]}
     if meth=="resources/read":
+      if not s.ui_supported: raise KeyError("MCP Apps resources were not negotiated")
       u=p.get("uri")
       if u not in UI_FILES: raise KeyError("unknown resource")
       return {"contents":[{"uri":u,"mimeType":MIME,"text":_ui_html(u),"_meta":RMETA}]}
@@ -200,13 +209,9 @@ class Server:
       except (UserError,TypeError,ValueError) as e:
         s.c.rollback(); return {"content":[{"type":"text","text":f"Error: {e}"}],"isError":True}
       txt=_summary(name,r)
-      if name in FALLBACK_PAGE:
-        r["fallback_url"]=fallback.link(s.c,FALLBACK_PAGE[name],{k:v for k,v in r.items() if k!="fallback_url"})
-        fb=("Open on phone / no-UI clients: "+r["fallback_url"]) if r["fallback_url"] else "(No fallback link: fallback_base_url not configured.)"
-        txt=(txt+"\n"+fb) if txt else fb
       body=json.dumps(r,ensure_ascii=False)
       out={"content":[{"type":"text","text":(txt+"\n"+body) if txt else body}],"structuredContent":r}
-      if name in TOOL_UI: out["_meta"]={"ui":{"resourceUri":TOOL_UI[name]}}
+      if s.ui_supported and name in TOOL_UI: out["_meta"]={"ui":{"resourceUri":TOOL_UI[name]}}
       return out
     raise NotImplementedError(meth)
   def respond(s,m):

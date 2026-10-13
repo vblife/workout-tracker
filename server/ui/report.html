@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workout Bot Report</title><style>
+:root{color-scheme:light dark;--bg:#f6f7f9;--card:#fff;--fg:#18202a;--muted:#667085;--accent:#3972e6;--line:#d9dee8}
+@media(prefers-color-scheme:dark){:root{--bg:#10141b;--card:#191f29;--fg:#edf1f7;--muted:#9aa6b5;--accent:#78a6ff;--line:#303a48}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif;padding:18px}.wrap{max-width:980px;margin:auto}
+h1{font-size:24px;margin:0}.sub{color:var(--muted);margin:3px 0 16px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}.value{font-size:24px;font-weight:750}.label{color:var(--muted)}
+#trend{grid-column:1/-1}svg{width:100%;height:190px}.legend{display:flex;gap:16px;color:var(--muted)}pre{white-space:pre-wrap;margin:0;font:inherit}@media(max-width:640px){body{padding:10px}.grid{grid-template-columns:1fr 1fr}.card{padding:11px}#trend{grid-column:1/-1}}
+</style></head><body><main class="wrap"><h1 id="title">Workout report</h1><p class="sub" id="range">Waiting for report data…</p><section class="grid" id="cards"></section></main>
+<script>
+const state={};function payload(){return window.openai?.toolOutput||window.openai?.structuredContent||state.data||{}}
+const fmt=v=>v==null?'—':Number.isInteger(v)?v:Number(v).toFixed(1);function card(label,value){return `<article class="card"><div class="value">${fmt(value)}</div><div class="label">${label}</div></article>`}
+function render(){const d=payload(),s=d.summary||{},n=d.nutrition||{};document.querySelector('#title').textContent=(d.label||'Workout')+' report';document.querySelector('#range').textContent=[d.start,d.end_exclusive].filter(Boolean).join(' to ');
+ document.querySelector('#cards').innerHTML=card('Sessions',s.sessions)+card('Training minutes',s.training_minutes)+card('Strength volume',s.volume)+(s.cardio_minutes!=null?card('Cardio minutes',s.cardio_minutes):'')+(s.estimated_calories!=null?card('Estimated workout calories',s.estimated_calories):'')+(n.calories_kcal!=null?card('Nutrition calories',n.calories_kcal):'')+`<article class="card" id="trend"><strong>Trends</strong><div class="legend">Training time · Strength volume · Cardio time</div><pre>${JSON.stringify(d.trend_series?.points||[],null,2)}</pre></article>`}
+window.addEventListener('openai:set_globals',e=>{state.data=e.detail?.globals?.toolOutput;render()});render();
+</script></body></html>
