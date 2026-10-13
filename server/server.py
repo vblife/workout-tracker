@@ -2,10 +2,10 @@
 """Workout Tracking MCP server (Python stdlib only). Usage: server.py --stdio [--db PATH]   (env WORKOUT_DB also honored)"""
 import json,sys,os,traceback
 sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
-import db as dbm, core, coach, reports, fallback
+import db as dbm, core, coach, reports, fallback, workouts, routines, goals, profile, nutrition
 from core import UserError
 HERE=os.path.dirname(os.path.abspath(__file__))
-NAME,VERSION="workout-tracker","0.2.0"
+NAME,VERSION="workout-bot","1.0.0"
 MIME="text/html;profile=mcp-app"; HIIT_URI="ui://workout/hiit.html"
 RMETA={"ui":{"prefersBorder":True,"csp":{"connectDomains":[],"resourceDomains":[]}},"openai/widgetDescription":"Configurable HIIT interval timer","openai/widgetPrefersBorder":True}
 PROG_URI="ui://workout/progress.html"; REPORT_URI="ui://workout/report.html"
@@ -26,9 +26,9 @@ SET_ITEM={"type":"object","properties":{
   "required":["exercise"],"additionalProperties":False}
 SEG={"type":"object","properties":{"kind":{"type":"string","enum":["work","rest"]},"seconds":{"type":"integer","minimum":1,"maximum":3600},"exercise":{"type":"string"}},"required":["kind","seconds"],"additionalProperties":False}
 TOOLS=[
- {"name":"get_context","title":"Get workout context","description":"Settings, onboarding status (onboarding_required lists missing keys: unit, days_per_week, goals), recent sessions, days trained this week, sets per muscle group. Call before planning or advising.",
+ {"name":"get_context","title":"Get workout context","description":"Settings and recent workout facts. Setup is optional and repeatable: never block logging, planning, reports, or coaching because a preference is missing.",
   "inputSchema":O({"days":{"type":"integer","minimum":1,"maximum":365,"default":14}}),"annotations":{"readOnlyHint":True}},
- {"name":"update_settings","title":"Update settings","description":"Upsert user settings. Keys: unit('lb'|'kg'), days_per_week(1-7), goals[str], preferred_days[str], session_minutes, experience, equipment[str], timezone, bodyweight, injuries, rep_range_default('8-12').",
+ {"name":"update_settings","title":"Update settings","description":"Repeatable setup: update only keys the user explicitly supplied. Supports units, timezone, schedule, goals, equipment, constraints, reminder toggles, nutrition preference, and structured HIIT defaults. Never reset omitted keys.",
   "inputSchema":O({"settings":{"type":"object","additionalProperties":True}},["settings"])},
  {"name":"resolve_exercise","title":"Resolve exercise names","description":"Map names/aliases (Chinese or English) to canonical exercises. status: matched (exact|fuzzy) / ambiguous (candidates) / not_found.",
   "inputSchema":O({"names":{"type":"array","items":{"type":"string"},"minItems":1}},["names"]),"annotations":{"readOnlyHint":True}},
@@ -70,6 +70,49 @@ TOOLS=[
   "inputSchema":O({"exercise":{"type":"string"},"metric":{"type":"string","enum":["e1rm","volume","best_set","reps","sets","days","cardio_minutes"]},"range":{"type":"string","enum":["4w","12w","6m","1y","all"],"default":"12w"}}),
   "annotations":{"readOnlyHint":True},"_meta":_uimeta(PROG_URI,"Drawing chart…","Chart ready")},
 ]
+
+ROUTINE_ITEM=O({"position":{"type":"integer","minimum":1},"exercise":{"type":"string"},"exercise_id":{"type":"integer"},"activity_name":{"type":"string"},
+  "target_sets":{"type":"integer","minimum":1},"target_reps":{"type":"integer","minimum":1},"target_weight":{"type":"number","minimum":0},
+  "unit":{"type":"string","enum":["lb","kg"]},"target_duration_s":{"type":"integer","minimum":1},"target_distance_m":{"type":"number","minimum":0},"notes":{"type":"string"}})
+SESSION_ITEM=O({"position":{"type":"integer","minimum":1},"exercise_id":{"type":"integer"},"activity_name":{"type":"string"},"target_sets":{"type":"integer","minimum":1},
+  "target_reps":{"type":"integer","minimum":1},"target_weight_kg":{"type":"number","minimum":0},"target_duration_s":{"type":"integer","minimum":1},"target_distance_m":{"type":"number","minimum":0},"notes":{"type":"string"}})
+NUTRIENT_PROPS={"consumed_at":{"type":"string"},"capture_timezone":{"type":"string"},"calories_kcal":{"type":["number","null"],"minimum":0},
+  "protein_g":{"type":["number","null"],"minimum":0},"carbohydrates_g":{"type":["number","null"],"minimum":0},"fat_g":{"type":["number","null"],"minimum":0},
+  "fiber_g":{"type":["number","null"],"minimum":0},"saturated_fat_g":{"type":["number","null"],"minimum":0},"sugar_g":{"type":["number","null"],"minimum":0},
+  "sodium_mg":{"type":["number","null"],"minimum":0},"estimation_method":{"type":"string","enum":["usda_hybrid","model_only"]},
+  "confidence":{"type":"string","enum":["higher","moderate","rough"]},"usda_contributed":{"type":"boolean"},"estimator_version":{"type":"string"},
+  "source_components":{"type":"integer","minimum":1},"uncertainty_flags":{"type":"array","items":{"type":"string","enum":["portion_uncertain","preparation_unknown","ingredients_unknown","image_unclear","usda_match_uncertain"]}}}
+NUTRIENT_DRAFT=O(NUTRIENT_PROPS,("estimation_method","confidence"))
+TOOLS.extend([
+ {"name":"create_goal","title":"Create goal","description":"Save a user-confirmed workout or nutrition goal. Direct user goals supersede recommendations for the same metric.","inputSchema":O({"domain":{"type":"string","enum":["workout","nutrition"]},"period":{"type":"string","enum":["day","week","month"]},"metric":{"type":"string"},"semantics":{"type":"string","enum":["minimum","maximum","exact","range"]},"target_value":{"type":"number"},"lower_value":{"type":"number"},"upper_value":{"type":"number"},"unit":{"type":"string"},"display_precision":{"type":"integer"},"origin":{"type":"string","enum":["user","recommended"]},"recommendation_version":{"type":"string"},"assumptions":{"type":"array","items":{}},"effective_start_date":{"type":"string"}},("domain","period","metric","semantics","unit","effective_start_date"))},
+ {"name":"list_goals","title":"List goals","description":"List active or historical goals.","inputSchema":O({"include_inactive":{"type":"boolean"},"domain":{"type":"string","enum":["workout","nutrition"]}}),"annotations":{"readOnlyHint":True}},
+ {"name":"delete_goal","title":"Deactivate goal","description":"Deactivate one goal after the user requests it.","inputSchema":O({"goal_id":{"type":"integer"}},("goal_id",)),"annotations":{"destructiveHint":True}},
+ {"name":"goal_progress","title":"Goal progress","description":"Calculate current progress from authoritative workout and nutrition records.","inputSchema":O({"goal_id":{"type":"integer"},"anchor_date":{"type":"string"}},("goal_id",)),"annotations":{"readOnlyHint":True}},
+ {"name":"add_body_weight","title":"Record body weight","description":"Record optional body weight for trend and calorie estimation.","inputSchema":O({"value":{"type":"number","exclusiveMinimum":0},"unit":{"type":"string","enum":["lb","kg"]},"measured_at":{"type":"string"}},("value","unit"))},
+ {"name":"list_body_weight","title":"List body weight","description":"List optional body-weight entries.","inputSchema":O({"limit":{"type":"integer","minimum":1,"maximum":1000}}),"annotations":{"readOnlyHint":True}},
+ {"name":"update_body_weight","title":"Correct body weight","description":"Correct one body-weight entry and recalculate affected calorie estimates.","inputSchema":O({"weight_id":{"type":"integer"},"value":{"type":"number","exclusiveMinimum":0},"unit":{"type":"string","enum":["lb","kg"]},"measured_at":{"type":"string"}},("weight_id","value","unit"))},
+ {"name":"delete_body_weight","title":"Delete body weight","description":"Delete one body-weight entry and recalculate affected calorie estimates.","inputSchema":O({"weight_id":{"type":"integer"}},("weight_id",)),"annotations":{"destructiveHint":True}},
+ {"name":"create_routine","title":"Create workout routine","description":"Create a reusable routine directly or from a completed workout the user explicitly asked to save. The source workout is unchanged.","inputSchema":O({"name":{"type":"string"},"description":{"type":"string"},"estimated_duration_min":{"type":"number","exclusiveMinimum":0},"source_session_id":{"type":"integer"},"items":{"type":"array","items":ROUTINE_ITEM,"minItems":1}},("name",))},
+ {"name":"list_routines","title":"List routines","description":"List reusable workout routines.","inputSchema":O({"include_archived":{"type":"boolean"}}),"annotations":{"readOnlyHint":True}},
+ {"name":"get_routine","title":"Get routine","description":"Retrieve one routine and ordered targets.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",)),"annotations":{"readOnlyHint":True}},
+ {"name":"update_routine","title":"Update routine","description":"Edit future routine starts; existing workout snapshots do not change.","inputSchema":O({"routine_id":{"type":"integer"},"name":{"type":"string"},"description":{"type":"string"},"estimated_duration_min":{"type":"number"},"items":{"type":"array","items":ROUTINE_ITEM,"minItems":1}},("routine_id",))},
+ {"name":"archive_routine","title":"Archive routine","description":"Archive a routine without breaking historical workout links.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",)),"annotations":{"destructiveHint":True}},
+ {"name":"restore_routine","title":"Restore routine","description":"Restore an archived routine.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",))},
+ {"name":"start_routine","title":"Start routine","description":"Start a saved routine by creating an independent active-workout snapshot. Never replace an existing active workout.","inputSchema":O({"routine_id":{"type":"integer"},"idempotency_key":{"type":"string"}},("routine_id",))},
+ {"name":"start_workout","title":"Start accepted plan","description":"Start an accepted conversational plan as an active snapshot; generating or showing a plan must not call this tool.","inputSchema":O({"mode":{"type":"string","enum":["conversational_plan"]},"title":{"type":"string"},"items":{"type":"array","items":SESSION_ITEM},"idempotency_key":{"type":"string"}},("mode",))},
+ {"name":"get_active_workout","title":"Resume active workout","description":"Return the one active workout, completed work, and pending items.","inputSchema":O({}),"annotations":{"readOnlyHint":True}},
+ {"name":"finish_workout","title":"Finish workout","description":"Finish the active workout immediately.","inputSchema":O({})},
+ {"name":"abandon_workout","title":"Abandon workout","description":"Abandon the active workout while preserving its history.","inputSchema":O({}),"annotations":{"destructiveHint":True}},
+ {"name":"nutrition_status","title":"Nutrition estimation status","description":"Report whether USDA hybrid estimation is available and whether model-only mode was acknowledged. Never returns the key.","inputSchema":O({}),"annotations":{"readOnlyHint":True}},
+ {"name":"search_usda","title":"Search USDA nutrients","description":"Search FoodData Central using an agent-produced text candidate only. Never send an image. Failure returns a model-only fallback.","inputSchema":O({"query":{"type":"string"}},("query",)),"annotations":{"readOnlyHint":True}},
+ {"name":"validate_nutrition","title":"Validate nutrition draft","description":"Validate and normalize a nutrient-only draft without saving. Food names, portions, images, descriptions, queries, and identifiers are forbidden.","inputSchema":O({"draft":NUTRIENT_DRAFT},("draft",)),"annotations":{"readOnlyHint":True}},
+ {"name":"save_nutrition","title":"Save confirmed nutrition","description":"Save only a final nutrient-only draft after the user explicitly confirms it in this conversation. Set confirmed=true only after confirmation.","inputSchema":O({"draft":NUTRIENT_DRAFT,"confirmed":{"type":"boolean","const":True}},("draft","confirmed"))},
+ {"name":"list_nutrition","title":"List nutrition","description":"List nutrient-only entries.","inputSchema":O({"from_date":{"type":"string"},"to_date":{"type":"string"},"limit":{"type":"integer"}}),"annotations":{"readOnlyHint":True}},
+ {"name":"update_nutrition","title":"Correct nutrition","description":"Update a corrected nutrient-only draft only after fresh user confirmation.","inputSchema":O({"entry_id":{"type":"integer"},"draft":NUTRIENT_DRAFT,"confirmed":{"type":"boolean","const":True}},("entry_id","draft","confirmed"))},
+ {"name":"delete_nutrition","title":"Delete nutrition","description":"Delete one confirmed nutrition entry after the user requests it.","inputSchema":O({"entry_id":{"type":"integer"}},("entry_id",)),"annotations":{"destructiveHint":True}},
+ {"name":"nutrition_daily_totals","title":"Daily nutrition totals","description":"Return confirmed daily nutrient totals without treating unknown nutrients as zero.","inputSchema":O({"local_date":{"type":"string"}},("local_date",)),"annotations":{"readOnlyHint":True}},
+ {"name":"recommend_nutrition_goals","title":"Recommend nutrition goals","description":"Prepare unsaved educational adult recommendations from explicit inputs. Show assumptions and ask before create_goal.","inputSchema":O({"inputs":{"type":"object","additionalProperties":True}},("inputs",)),"annotations":{"readOnlyHint":True}},
+])
 RESOURCES=[{"uri":HIIT_URI,"name":"hiit_timer_view","title":"HIIT Timer","description":"Configurable HIIT timer","mimeType":MIME,"_meta":RMETA},
  {"uri":PROG_URI,"name":"progress_view","title":"Progress chart","description":"Progress charts","mimeType":MIME,"_meta":{**RMETA,"openai/widgetDescription":"Workout progress chart"}},
  {"uri":REPORT_URI,"name":"report_view","title":"Workout report","description":"Period report","mimeType":MIME,"_meta":{**RMETA,"openai/widgetDescription":"Workout report"}}]
@@ -100,18 +143,47 @@ def call_tool(c,name,a):
   if name=="daily_plan_context": return coach.daily_plan_context(c,**a)
   if name=="report": return reports.report(c,**a)
   if name=="show_progress": return reports.show_progress(c,**a)
+  if name=="create_goal": return goals.create_goal(c,**a)
+  if name=="list_goals": return goals.list_goals(c,**a)
+  if name=="delete_goal": return goals.delete_goal(c,**a)
+  if name=="goal_progress": return goals.goal_progress(c,**a)
+  if name=="add_body_weight": return profile.add_body_weight(c,**a)
+  if name=="list_body_weight": return profile.list_body_weight(c,**a)
+  if name=="update_body_weight": return profile.update_body_weight(c,**a)
+  if name=="delete_body_weight": return profile.delete_body_weight(c,**a)
+  if name=="create_routine": return routines.create_routine(c,**a)
+  if name=="list_routines": return routines.list_routines(c,**a)
+  if name=="get_routine": return routines.get_routine(c,**a)
+  if name=="update_routine": return routines.update_routine(c,**a)
+  if name=="archive_routine": return routines.set_archived(c,a["routine_id"],True)
+  if name=="restore_routine": return routines.set_archived(c,a["routine_id"],False)
+  if name=="start_routine": return routines.start_routine(c,**a)
+  if name=="start_workout": return workouts.start_workout(c,**a)
+  if name=="get_active_workout": return workouts.get_active(c)
+  if name=="finish_workout": return workouts.finish_workout(c)
+  if name=="abandon_workout": return workouts.abandon_workout(c)
+  if name=="nutrition_status": return nutrition.nutrition_status(c)
+  if name=="search_usda": return nutrition.search_usda(**a)
+  if name=="validate_nutrition": return nutrition.validate_draft(a["draft"])
+  if name=="save_nutrition": return nutrition.save_entry(c,a["draft"],a.get("confirmed",False))
+  if name=="list_nutrition": return nutrition.list_entries(c,**a)
+  if name=="update_nutrition": return nutrition.update_entry(c,a["entry_id"],a["draft"],a.get("confirmed",False))
+  if name=="delete_nutrition": return nutrition.delete_entry(c,**a)
+  if name=="nutrition_daily_totals": return nutrition.daily_totals(c,a["local_date"])
+  if name=="recommend_nutrition_goals": return nutrition.recommend_goals(a["inputs"])
   raise KeyError(f"unknown tool: {name}")
 
 class Server:
   def __init__(s,db_path=None): s.c=dbm.connect(db_path)
   def handle(s,m):
     meth=m.get("method"); p=m.get("params") or {}
+    workouts.reconcile_active(s.c)
     if meth=="initialize":
       pv=p.get("protocolVersion")
       return {"protocolVersion":pv if pv in("2024-11-05","2025-03-26","2025-06-18","2025-11-25") else "2025-06-18",
         "capabilities":{"tools":{"listChanged":False},"resources":{"listChanged":False},"extensions":{"io.modelcontextprotocol/ui":{"mimeTypes":[MIME]}}},
         "serverInfo":{"name":NAME,"version":VERSION},
-        "instructions":"Workout tracker for Charles. Parse natural-language sets into log_sets args; the server normalizes exercise names (EN/中文). If get_context.onboarding_required is non-empty, ask for unit, days/week and goals and call update_settings."}
+        "instructions":"Workout Bot is a private local fitness assistant. Use tools for authoritative writes and numbers. Setup is optional and repeatable; never block logging, planning, reports, or coaching on missing preferences. Automatically log completed work, never log a proposed set as completed, confirm unknown exercises, and require explicit confirmation before saving nutrient-only nutrition drafts or destructive multi-record changes."}
     if meth=="ping": return {}
     if meth=="tools/list": return {"tools":TOOLS}
     if meth=="resources/list": return {"resources":RESOURCES}

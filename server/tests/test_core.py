@@ -47,10 +47,10 @@ class T(unittest.TestCase):
     d=core.log_sets(s.c,[{"exercise":"squat","reps":5,"weight":100}],performed_at="2026-10-01T18:00:00")
     s.assertNotEqual(a["session_id"],b["session_id"]); s.assertNotEqual(b["session_id"],d["session_id"])
   def test_settings_onboarding(s):
-    s.assertEqual(core.get_context(s.c)["onboarding_required"],["unit","days_per_week","goals"])
+    s.assertEqual(core.get_context(s.c)["onboarding_required"],[])
     with s.assertRaises(core.UserError): core.update_settings(s.c,{"unit":"stone"})
     r=core.update_settings(s.c,{"unit":"kg","days_per_week":5,"goals":["strength","cardio","hiking"]})
-    s.assertEqual(r["onboarding_required"],[]); s.assertIn("onboarded_at",r["settings"])
+    s.assertEqual(r["onboarding_required"],[])
     x=core.log_sets(s.c,[{"exercise":"squat","reps":8,"weight":100,"unit":"lb"}])["logged"][0]
     s.assertEqual((x["weight"],x["unit"]),(100.0,"lb"))
     s.assertEqual(core.list_recent(s.c)["sets"][0]["weight"],45.4)

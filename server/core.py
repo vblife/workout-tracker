@@ -11,8 +11,11 @@ TZ=ZoneInfo("America/Los_Angeles")
 SESSION_GAP_MIN=30
 AUTO_FUZZY=0.85
 SETTING_KEYS={"unit":str,"days_per_week":int,"goals":list,"preferred_days":list,"session_minutes":int,
-  "experience":str,"equipment":list,"timezone":str,"bodyweight":float,"injuries":str,"rep_range_default":str,"onboarded_at":str,"fallback_base_url":str}
-ONBOARDING_REQUIRED=("unit","days_per_week","goals")
+  "experience":str,"equipment":list,"timezone":str,"bodyweight":float,"injuries":str,"constraints":str,
+  "rep_range_default":str,"onboarded_at":str,"reminders_enabled":bool,"daily_plan_enabled":bool,
+  "workout_reminder_enabled":bool,"weekly_report_enabled":bool,"hiit_defaults":dict,
+  "model_only_acknowledged":bool,"nutrition_profile":dict,"fallback_base_url":str}
+ONBOARDING_REQUIRED=()
 
 class UserError(Exception): pass
 
@@ -37,19 +40,24 @@ def update_settings(c,settings):
     if k not in SETTING_KEYS: raise UserError(f"unknown setting '{k}'. Allowed: {sorted(SETTING_KEYS)}")
     typ=SETTING_KEYS[k]
     if typ is float and isinstance(v,int): v=float(v)
-    if not isinstance(v,typ) or isinstance(v,bool): raise UserError(f"setting '{k}' must be {typ.__name__}")
+    if not isinstance(v,typ) or (typ is not bool and isinstance(v,bool)): raise UserError(f"setting '{k}' must be {typ.__name__}")
     if k=="unit" and v not in("lb","kg"): raise UserError("unit must be 'lb' or 'kg'")
     if k=="days_per_week" and not 1<=v<=7: raise UserError("days_per_week must be 1-7")
     if k=="fallback_base_url" and not v.startswith("https://"): raise UserError("fallback_base_url must be https://")
     if k=="rep_range_default":
       import re
       if not re.fullmatch(r"\d{1,2}-\d{1,2}",v): raise UserError("rep_range_default must look like 8-12")
+    if k=="timezone":
+      try: ZoneInfo(v)
+      except Exception: raise UserError("timezone must be a valid IANA timezone")
+    if k=="hiit_defaults":
+      required={"work_duration_s","rest_duration_s","rounds","warmup_s","cooldown_s"}
+      if set(v)!=required or any(not isinstance(v[x],int) or v[x]<0 for x in required) or v["work_duration_s"]<1 or v["rest_duration_s"]<1 or v["rounds"]<1:
+        raise UserError("hiit_defaults needs positive work/rest/rounds and non-negative warmup/cooldown")
   t=dbm.now()
   for k,v in settings.items():
     c.execute("INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",(k,json.dumps(v,ensure_ascii=False),t))
   s=get_settings(c)
-  if "onboarded_at" not in s and all(k in s for k in ONBOARDING_REQUIRED):
-    c.execute("INSERT INTO settings VALUES('onboarded_at',?,?)",(json.dumps(t),t)); s["onboarded_at"]=t
   c.commit()
   return {"settings":s,"onboarding_required":[k for k in ONBOARDING_REQUIRED if k not in s]}
 
