@@ -25,7 +25,8 @@ The database is isolated from other Grok Bot users. It is not a security boundar
 
 - Natural-language strength, bodyweight, cardio, hike, mobility, and HIIT logging.
 - English and Chinese exercise-name aliases, including user-taught aliases.
-- Quick conversational logging plus one resumable active workout at a time, without requiring a live workout screen.
+- Quick conversational logging that automatically starts a workout on the first logged set or activity and completes it after 15 minutes of inactivity.
+- One resumable active workout at a time, without requiring a live workout screen.
 - Deterministic PR, estimated one-rep max, progressive-overload, recovery, and planning calculations.
 - Ephemeral agent-generated workout plans; starting one persists only an active-workout snapshot, never a plan record.
 - Reusable workout routines created from completed workouts on request.
@@ -126,13 +127,23 @@ Routine edits affect future starts only. A referenced routine is archived instea
 
 ### Active workouts and routine snapshots
 
-The existing `sessions` table gains `in_progress`, `completed`, and `abandoned` lifecycle states, nullable `source_routine_id`, and consistent `started_at` and `ended_at` handling. Existing historical sessions migrate as `completed`.
+The existing `sessions` table gains `in_progress`, `completed`, and `abandoned` lifecycle states; nullable `source_routine_id`; a start mode of `implicit`, `routine`, or `conversational_plan`; `last_activity_at`; and consistent `started_at` and `ended_at` handling. Existing historical sessions migrate as `completed`.
 
 Starting a saved routine transactionally creates an `in_progress` workout and copies its ordered items into `workout_session_items`. These session items are an independent snapshot of the routine targets, not a stored workout plan. Starting an accepted conversational plan uses the same session-item snapshot with no source routine. Merely generating or viewing a plan writes nothing.
 
 Only one workout may be `in_progress`. Its session items support `pending`, `completed`, `skipped`, and `replaced` states. The user may add ad-hoc session items, replace or reorder exercises, or log different sets while training. These changes affect only the active workout; the source routine changes only after a separate explicit update request.
 
 Actual sets and activities link to the active workout and, when applicable, its session item. Resuming returns the snapshot, completed work, and next unfinished item. Finishing records the actual result and calculates derived statistics. Abandoning preserves the session as `abandoned` until the user explicitly deletes it.
+
+### Automatic workout lifecycle
+
+When the first set or activity is logged and no workout is active, the server creates an `in_progress` session with start mode `implicit` and attaches the entry in the same transaction. Each subsequent logged set or activity updates `last_activity_at`. Entries at or within 15 minutes of the last activity remain in the same workout.
+
+Before every MCP operation and when the server opens the database, the server reconciles the active session. If a session containing actual work has been inactive for more than 15 minutes, it becomes `completed`, remaining pending session items become `skipped`, and `ended_at` is set to the last actual activity time. If a new log triggered reconciliation, the new entry starts a new implicit workout after the prior workout is closed.
+
+An explicitly started routine or conversational plan with no actual work becomes `abandoned` after 15 minutes, with the timeout boundary recorded as its close time. Abandoned sessions are excluded from workout totals. Explicit finish or abandon remains available and takes effect immediately.
+
+The server does not depend on an in-process timer or scheduled worker. A stale row may physically remain `in_progress` while the stdio server is not running, but no client can observe it as active: every startup and operation reconciles it first. The completion time reflects the last activity rather than the later detection time. The inactivity threshold is a fixed V1 rule and uses UTC timestamps.
 
 ### Body weight
 
@@ -205,10 +216,13 @@ New or extended responsibilities are grouped as follows:
 ### Active workouts
 
 - Start an accepted conversational plan as an active workout without creating a plan record.
+- Automatically create an implicit active workout when logging begins without one.
+- Reconcile inactivity before every operation and at database startup.
 - Retrieve and resume the one active workout.
 - Add, replace, reorder, skip, or complete session items without modifying a source routine.
 - Log, edit, or remove actual sets and activities against the active session.
 - Finish or abandon the active workout through valid state transitions.
+- Correct timeout grouping by moving an entry or merging adjacent completed workouts, then recalculate derived values.
 - Return completed-workout provenance through nullable `source_routine_id`.
 
 ### Body weight and calories
@@ -243,7 +257,9 @@ Setup is not a one-time gate. On first use it collects only required missing val
 
 ### Quick logging
 
-Users report completed work naturally. If a workout is active, new sets and activities default to that session; otherwise, the agent records a completed workout directly. Suggested work is never marked complete merely because it was proposed. Unknown exercises require confirmation and may then be saved as aliases or new exercises.
+Users report work naturally. Before logging, the server reconciles any stale active workout. If a current workout remains active, the new set or activity joins it and refreshes `last_activity_at`; otherwise, the server automatically starts an implicit workout and attaches the entry. The agent does not need to ask the user to start first. Suggested work is never marked complete merely because it was proposed. Unknown exercises require confirmation and may then be saved as aliases or new exercises.
+
+A later entry more than 15 minutes after the previous activity closes the prior workout before starting a new implicit workout. If the user says an entry was grouped incorrectly, correction tools may move it to the intended completed workout or merge adjacent workouts, with derived statistics recalculated transactionally.
 
 ### Conversational plans
 
@@ -313,6 +329,8 @@ Trend windows are:
 
 Daily reports show that day's confirmed nutrient totals and each configured daily nutrition goal. Longer reports show per-day nutrition averages, the number of days with confirmed entries, goal-hit rates, and confidence coverage; they do not treat days without nutrition entries as zero intake. Nutrition does not add a default scheduled routine.
 
+Workout totals include completed sessions only. A currently active session may be shown separately as in progress, while abandoned empty sessions are omitted. Report generation always runs stale-session reconciliation before aggregation.
+
 Charts must remain legible in light and dark themes and at narrow and desktop widths. Text results contain the key totals and findings even when the dashboard is rendered.
 
 ## Skills
@@ -366,6 +384,10 @@ The old `workout-tracker` product name, Charles-specific wording, obsolete `/hom
 - Destructive multi-record operations require confirmation; single-set undo remains direct.
 - Starting a routine or accepted conversational plan is transactional and idempotent, so retries cannot create duplicate active workouts.
 - The database enforces at most one `in_progress` workout. A second start never silently replaces the active workout.
+- Logging the first set or activity without an active workout creates the implicit workout and the entry atomically.
+- Every database startup and MCP operation reconciles sessions inactive for more than 15 minutes before reading or writing observable state.
+- Stale sessions with work complete at their last activity time; stale empty explicit sessions become abandoned. Neither rule depends on a background process.
+- Timeout-boundary behavior is deterministic: exactly 15 minutes remains the same workout, while more than 15 minutes closes it.
 - Routine snapshots are isolated from later routine edits, and active-workout pivots never mutate the source routine without a separate explicit request.
 - Referenced routines are archived rather than hard-deleted, preserving historical `source_routine_id` links.
 - Repeated HIIT completion callbacks are idempotent.
@@ -389,7 +411,12 @@ Automated verification covers:
 - Goal edits, deleted workouts, and streak recalculation.
 - Workout-routine creation from a completed workout, direct creation, editing, ordering, archiving, restoring, and historical source links.
 - Active-workout creation from a routine snapshot and from an accepted conversational plan without any persisted plan record.
-- Single-active-workout enforcement, idempotent start, resume, valid state transitions, incremental set logging, pivots, finish, abandon, and explicit deletion.
+- Implicit active-workout creation on the first logged set or activity, including atomic rollback on validation failure.
+- Logs at, below, and above the 15-minute boundary; `last_activity_at` refresh; stale completion at the last activity time; and automatic creation of a new workout for the next log.
+- Reconciliation on database startup and before every read or write, proving the observed result does not require a resident timer or scheduled worker.
+- Auto-abandonment of empty explicit starts, automatic skipping of pending snapshot items, and exclusion of abandoned sessions from totals.
+- Correction of timeout grouping by moving entries or merging adjacent completed workouts with full derived-value recalculation.
+- Single-active-workout enforcement, idempotent start, resume, valid state transitions, incremental set logging, pivots, explicit finish, explicit abandon, and explicit deletion.
 - Snapshot isolation when a routine changes, plus the rule that active-workout changes do not update a routine without an explicit request.
 - Migration of historical workouts to `completed` and schema checks for `workout_routines`, `workout_routine_items`, and `workout_session_items`.
 - Body-weight history, normalized units, calorie input priority, fallback assumptions, confidence, and recalculation.
@@ -414,6 +441,9 @@ Automated verification covers:
 - The installed code and durable database use the exact approved paths.
 - A new user can finish repeatable setup, receive an ephemeral plan, start it as a resumable workout, pivot, and finish or abandon it without creating a plan record.
 - A user can create a reusable routine from a completed workout on request and start, resume, or pivot from a saved routine.
+- Logging a first set or activity automatically starts a workout when none is active, without requiring a separate start command.
+- A workout with logged activity automatically completes after more than 15 minutes of inactivity, using the last activity as its effective end time; the next log begins a new workout.
+- The 15-minute lifecycle remains correct across stdio server restarts without a background timer.
 - Users can create daily, weekly, and monthly workout-derived goals and receive correct progress and streaks.
 - Calories are estimated for eligible sessions even when inputs require documented fallbacks, with transparent confidence and assumptions.
 - A user can upload a meal image, review and correct the estimate, and save it only after explicit confirmation.
