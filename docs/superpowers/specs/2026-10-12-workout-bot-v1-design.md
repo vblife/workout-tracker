@@ -369,6 +369,24 @@ Users may edit, pause, or delete each scheduled automation. Monthly and annual r
 
 The old `workout-tracker` product name, Charles-specific wording, obsolete `/home/box/workout` paths, stale skill identifiers, and recommendations for extra default routines are removed from user-facing and agent-facing documentation.
 
+## Agent behavior evaluation
+
+Promptfoo is the evaluation runner for agent behavior. The repository contains exactly one Promptfoo configuration named `workout-evals`, stored at `evals/workout-evals.yaml`; it does not split current-state smoke coverage and V1 contract coverage into separate configurations.
+
+The suite is contract-first. Every case expresses the approved Workout Bot V1 behavior, even when the current implementation does not yet satisfy it. Harness validation and fixture tests must pass independently, while the first live evaluation is preserved as an expected failing baseline that guides later implementation. Cases cover setup, quick logging, automatic workout lifecycle, routines, ephemeral plans, nutrition confirmation and privacy, goals, reports, reminders, HIIT preferences, Chinese exercise aliases, safety, and destructive-action confirmation.
+
+The evaluated agent and every model-graded assertion use Promptfoo's `openai:codex-sdk` provider with the explicit model `gpt-6-luna` and `model_reasoning_effort: max`. Authentication reuses the local Codex ChatGPT-subscription login. Evaluation commands must fail fast when `OPENAI_API_KEY` or `CODEX_API_KEY` is present so a run cannot silently switch to API billing. No API key is stored in the repository.
+
+Each case receives an isolated temporary workspace and SQLite database. Promptfoo passes the database path to a local `workout-bot` stdio MCP server through Codex `cli_config.mcp_servers`; the server command, working directory, and environment are explicit. The Codex agent runs read-only, with approval disabled and network access disabled. Tests never read or write the developer's checked-in `workout.db` or the production data path.
+
+Assertions prefer deterministic evidence: final response content, captured MCP tool names and arguments, SQLite state, forbidden-field scans, and absence of writes. Model-graded rubrics are limited to conversational qualities that cannot be reduced to exact state, such as whether uncertainty and a recommended next step are communicated clearly. Traced MCP calls are retained in Promptfoo results for diagnosis.
+
+The eval harness has three separate outcomes:
+
+- Harness tests verify configuration invariants, temporary-database isolation, cleanup, assertion helpers, and protection against API-key authentication.
+- `promptfoo validate` verifies that `workout-evals` is structurally valid.
+- A live `workout-evals` run exercises Luna through the user's ChatGPT subscription and may contain expected V1 contract failures until the implementation catches up.
+
 ## External reference basis
 
 - [USDA FoodData Central API Guide](https://fdc.nal.usda.gov/api-guide/) for API access, key handling, endpoints, rate limits, and CC0 food-composition data.
@@ -405,6 +423,12 @@ The old `workout-tracker` product name, Charles-specific wording, obsolete `/hom
 ## Verification
 
 Automated verification covers:
+
+- A single Promptfoo configuration named `workout-evals`, with no `current-smoke` or `v1-contract` configuration.
+- Codex SDK provider pinning to `gpt-6-luna` with `model_reasoning_effort: max` for both evaluated behavior and model-graded assertions.
+- ChatGPT-subscription authentication safeguards that reject `OPENAI_API_KEY` and `CODEX_API_KEY` before a live run.
+- Per-case temporary SQLite isolation, cleanup, read-only agent execution, disabled network access, and local stdio MCP configuration.
+- Deterministic assertions over MCP tool trajectories and SQLite effects, plus a saved initial V1 contract baseline.
 
 - Schema migration from the current database version and clean database creation.
 - Goal calculations across day, week, and month boundaries in the configured timezone.
