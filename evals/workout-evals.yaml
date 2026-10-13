@@ -1,0 +1,38 @@
+description: workout-evals
+sharing: false
+maxConcurrency: 1
+tracing:
+  enabled: true
+
+prompts:
+  - file://prompts/workout-agent.txt
+
+providers:
+  - &luna_max
+    id: openai:codex-sdk
+    config:
+      model: gpt-6-luna
+      model_reasoning_effort: max
+      working_dir: "{{repoRoot}}"
+      sandbox_mode: read-only
+      approval_policy: never
+      network_access_enabled: false
+      web_search_mode: disabled
+      enable_streaming: true
+      cli_config:
+        mcp_servers:
+          workout-bot:
+            command: python3
+            args:
+              - server/server.py
+              - --stdio
+              - --db
+              - "{{workoutDbPath}}"
+            cwd: "{{repoRoot}}"
+            env:
+              WORKOUT_DB: "{{workoutDbPath}}"
+
+extensions:
+  - file://support/fixture-hooks.mjs:extensionHook
+
+tests: file://cases.yaml
