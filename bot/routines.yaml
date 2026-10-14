@@ -18,7 +18,9 @@ routines:
       workout is complete, stay quiet. Otherwise send a short reminder with today's focus.
   - slug: workout-weekly-report
     name: Weekly report
-    schedule: "4 20 * * 0"
+    schedule: "0 8 * * 0"
     prompt: >-
-      Run the vblife-workout-report skill for the week ending today and send the
-      text summary.
+      Run the vblife-workout-report skill and call report with period=week and
+      anchor_date set to today's local date. On compatible MCP Apps clients, render
+      and send the report dashboard. Always include a concise text summary; when
+      dashboard UI is unavailable, send the text summary alone.
