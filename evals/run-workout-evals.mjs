@@ -21,27 +21,28 @@ export const promptfooArgs = [
   '1',
 ];
 
-export function assertSubscriptionEnvironment(env) {
-  const present = ['OPENAI_API_KEY', 'CODEX_API_KEY'].filter((name) => env[name]);
-  if (present.length) {
-    throw new Error(
-      `Refusing API-key billing. Unset ${present.join(' and ')} before running workout-evals; the suite must reuse the existing ChatGPT/Codex login.`,
-    );
-  }
+export function subscriptionEnvironment(env) {
+  const childEnv = { ...env };
+  delete childEnv.OPENAI_API_KEY;
+  delete childEnv.CODEX_API_KEY;
+  return childEnv;
 }
 
-function run() {
-  assertSubscriptionEnvironment(process.env);
+export function runWorkoutEvals(env = process.env, spawn = spawnSync) {
   mkdirSync(dirname(output), { recursive: true });
-  const result = spawnSync(
+  const result = spawn(
     process.execPath,
     promptfooArgs,
-    { cwd: fileURLToPath(new URL('..', import.meta.url)), env: process.env, stdio: 'inherit' },
+    {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: subscriptionEnvironment(env),
+      stdio: 'inherit',
+    },
   );
   if (result.error) throw result.error;
-  process.exitCode = result.status ?? 1;
+  return result.status ?? 1;
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  run();
+  process.exitCode = runWorkoutEvals();
 }
