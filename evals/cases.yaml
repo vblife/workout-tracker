@@ -1,6 +1,6 @@
 - description: repeatable setup changes explicit preferences only
   metadata:
-    skill: vblife-workout-setup
+    skill: vblife-workout-config
   vars:
     userMessage: >-
       Run setup again. Change my units to kilograms, set three training days per week,

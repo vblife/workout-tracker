@@ -4,10 +4,10 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SKILLS = {
-    "vblife-workout-setup", "vblife-workout-log", "vblife-workout-daily-plan",
+    "vblife-workout-config", "vblife-workout-log", "vblife-workout-daily-plan",
     "vblife-workout-progressive-overload", "vblife-workout-hiit-session",
     "vblife-workout-routine", "vblife-workout-nutrition", "vblife-workout-report",
-    "vblife-workout-analysis",
+    "vblife-workout-analysis", "vblife-workout-install",
 }
 
 
@@ -47,7 +47,7 @@ class ProductContractTest(unittest.TestCase):
         self.assertIn("query_stats", combined)
 
     def test_agent_contract_and_only_three_scheduled_routines(self):
-        text = read("AGENT.md")
+        text = read("bot/instructions.md")
         self.assertIn("Workout Bot", text)
         self.assertIn("workout-bot", text)
         self.assertIn("ephemeral", text.lower())

@@ -1,0 +1,24 @@
+# Scheduled Grok Bot routines created for every new Workout Bot.
+# The bot creates these itself after the user confirms timezone and training days.
+# Schedules are 5-field cron in the user's local time. {training_days} is the
+# cron day-of-week list of the user's preferred training days (e.g. 1-5).
+routines:
+  - slug: workout-daily-plan
+    name: Daily plan
+    schedule: "7 7 * * *"
+    prompt: >-
+      Build today's workout plan with the vblife-workout-daily-plan skill and send it.
+      On a planned rest day send only the recovery recommendation. Do not start a
+      workout or log anything.
+  - slug: workout-reminder
+    name: Workout reminder
+    schedule: "3 17 * * {training_days}"
+    prompt: >-
+      Check get_active_workout and today's logs. If a workout is active or today's
+      workout is complete, stay quiet. Otherwise send a short reminder with today's focus.
+  - slug: workout-weekly-report
+    name: Weekly report
+    schedule: "4 20 * * 0"
+    prompt: >-
+      Run the vblife-workout-report skill for the week ending today and send the
+      text summary.

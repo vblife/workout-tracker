@@ -1,0 +1,6 @@
+{
+  "name": "workout-bot",
+  "command": "/usr/bin/python3",
+  "args": ["/home/vblife/workout/server/server.py", "--stdio"],
+  "env": {"WORKOUT_DB": "/workspace/vblife/workout-data/workout.db"}
+}

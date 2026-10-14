@@ -67,7 +67,7 @@ test('contract cases cover every approved skill exactly by metadata set', () => 
     'vblife-workout-progressive-overload',
     'vblife-workout-report',
     'vblife-workout-routine',
-    'vblife-workout-setup',
+    'vblife-workout-config',
   ]);
 
   const byDescription = Object.fromEntries(cases.map((entry) => [entry.description, entry]));

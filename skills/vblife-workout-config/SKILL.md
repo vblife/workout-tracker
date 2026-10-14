@@ -1,8 +1,8 @@
 ---
-name: vblife-workout-setup
+name: vblife-workout-config
 description: Use when the user wants to review or change Workout Bot preferences, goals, reminders, equipment, schedule, units, nutrition mode, or HIIT defaults.
 ---
-# Repeatable setup
+# Repeatable configuration
 
 Setup is optional and repeatable, never a prerequisite for logging, planning, coaching, or reports.
 
