@@ -40,7 +40,7 @@ evals/              the single workout-evals Promptfoo suite
 
 ## Scheduled routines
 
-The template provisions only a daily plan at 07:00 local, a workout reminder at 17:00 on preferred training days, and a weekly report Sunday at 20:00. They are proactive by default after schedule setup, and users may disable or edit them. Monthly and annual reports remain available on demand.
+The template provisions only a daily plan at 07:00 local, a workout reminder at 17:00 on preferred training days, and a weekly report Sunday at 08:00. The weekly report renders the MCP Apps dashboard on compatible clients and always includes a concise text summary as a fallback. Routines are proactive by default after schedule setup, and users may disable or edit them. Monthly and annual reports remain available on demand.
 
 ## Privacy boundary
 

@@ -68,7 +68,7 @@ test('contract cases cover every approved skill exactly by metadata set', () => 
     'vblife-workout-report',
     'vblife-workout-routine',
     'vblife-workout-config',
-  ]);
+  ].sort());
 
   const byDescription = Object.fromEntries(cases.map((entry) => [entry.description, entry]));
   assert.match(

@@ -56,6 +56,12 @@ class ProductContractTest(unittest.TestCase):
         routines = read("bot/routines.yaml")
         names = re.findall(r"(?m)^    name: (.+)$", routines)
         self.assertEqual(names, ["Daily plan", "Workout reminder", "Weekly report"])
+        weekly = routines.split("  - slug: workout-weekly-report\n", 1)[1]
+        self.assertIn('schedule: "0 8 * * 0"', weekly)
+        self.assertIn("period=week", weekly)
+        self.assertIn("anchor_date", weekly)
+        self.assertIn("dashboard", weekly.lower())
+        self.assertIn("text summary", weekly.lower())
         self.assertNotIn("Charles", text)
         self.assertNotIn("/home/box/workout", text)
         self.assertNotIn("fallback_url", text)
@@ -65,7 +71,8 @@ class ProductContractTest(unittest.TestCase):
         text = read("README.md")
         for expected in ("# Workout Bot", "/home/vblife/workout", "/workspace/vblife/workout-data/workout.db",
                          "USDA_FDC_API_KEY", "https://fdc.nal.usda.gov/api-key-signup/", "MCP Apps",
-                         "npm run eval:workout", "python3 -m unittest", "daily plan", "workout reminder", "weekly report"):
+                         "npm run eval:workout", "python3 -m unittest", "daily plan", "workout reminder",
+                         "weekly report Sunday at 08:00"):
             self.assertIn(expected, text)
         self.assertNotIn("Workout Tracker", text)
         self.assertNotIn("/home/box/workout", text)
