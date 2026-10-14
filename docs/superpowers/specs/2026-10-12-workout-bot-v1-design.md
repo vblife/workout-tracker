@@ -429,7 +429,7 @@ Automated verification covers:
 - A single Promptfoo configuration named `workout-evals`, with no `current-smoke` or `v1-contract` configuration.
 - Exact metadata coverage for all nine approved `vblife-workout-*` skills, including dedicated progressive-overload and open-ended-analysis behaviors.
 - Codex SDK provider pinning to `gpt-6-luna` with `model_reasoning_effort: max` for both evaluated behavior and model-graded assertions.
-- ChatGPT-subscription authentication safeguards that reject `OPENAI_API_KEY` and `CODEX_API_KEY` before a live run.
+- ChatGPT-subscription authentication safeguards that remove `OPENAI_API_KEY` and `CODEX_API_KEY` from the live Promptfoo child process without mutating the parent shell.
 - Per-case temporary SQLite isolation, cleanup, read-only agent execution, disabled network access, and local stdio MCP configuration.
 - Deterministic assertions over MCP tool trajectories and SQLite effects, plus a saved initial V1 contract baseline.
 

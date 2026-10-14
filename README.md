@@ -55,4 +55,4 @@ npm run eval:validate
 npm run eval:workout
 ```
 
-The live eval uses GPT-6 Luna with max reasoning through the ChatGPT subscription login and rejects `OPENAI_API_KEY` or `CODEX_API_KEY` to prevent accidental API billing.
+The live eval uses GPT-6 Luna with max reasoning through the ChatGPT subscription login. Its Node wrapper removes `OPENAI_API_KEY` and `CODEX_API_KEY` from the Promptfoo child process to prevent accidental API billing, so `npm run eval:workout` is sufficient even when those variables exist in the parent shell.

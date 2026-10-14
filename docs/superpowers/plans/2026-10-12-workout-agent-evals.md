@@ -14,7 +14,7 @@
 
 - There is exactly one Promptfoo configuration: `evals/workout-evals.yaml`, described as `workout-evals`; do not create `current-smoke` or `v1-contract` configurations.
 - Target and model-graded providers are `openai:codex-sdk` with `model: gpt-6-luna` and `model_reasoning_effort: max`.
-- Live runs reuse the local Codex ChatGPT-subscription login and reject both `OPENAI_API_KEY` and `CODEX_API_KEY`.
+- Live runs reuse the local Codex ChatGPT-subscription login and remove both `OPENAI_API_KEY` and `CODEX_API_KEY` from the Promptfoo child process.
 - Every case uses a unique temporary database; never use repository `workout.db` or `/workspace/vblife/workout-data/workout.db` in evals.
 - The Codex target is read-only, uses `approval_policy: never`, and has network and web search disabled.
 - The MCP server is local stdio and receives the case database through `WORKOUT_DB`.
@@ -283,16 +283,17 @@ git commit -m "test: add workout eval assertions"
 
 **Interfaces:**
 - Consumes: local Codex login under the normal Codex home and the `promptfoo` executable installed by Task 1.
-- Produces: exported `assertSubscriptionEnvironment(env)` and a CLI that invokes `promptfoo eval -c evals/workout-evals.yaml --no-cache --output evals/results/latest.json`; ignored `evals/results/` runtime artifacts.
+- Produces: exported `subscriptionEnvironment(env)` and a CLI that invokes `promptfoo eval -c evals/workout-evals.yaml --no-cache --output evals/results/latest.json`; ignored `evals/results/` runtime artifacts.
 
-- [ ] **Step 1: Write failing authentication-guard tests**
+- [ ] **Step 1: Write failing subscription-environment tests**
 
-Create `evals/tests/run-workout-evals.test.mjs` with three tests:
+Create `evals/tests/run-workout-evals.test.mjs` with tests that verify both API-key variables are removed from the child environment, unrelated variables are preserved, and the input environment is not mutated:
 
 ```javascript
-assert.doesNotThrow(() => assertSubscriptionEnvironment({ PATH: process.env.PATH }));
-assert.throws(() => assertSubscriptionEnvironment({ OPENAI_API_KEY: 'sk-test' }), /OPENAI_API_KEY/);
-assert.throws(() => assertSubscriptionEnvironment({ CODEX_API_KEY: 'test' }), /CODEX_API_KEY/);
+const input = { PATH: '/usr/bin', OPENAI_API_KEY: 'sk-test', CODEX_API_KEY: 'test' };
+assert.deepEqual(subscriptionEnvironment(input), { PATH: '/usr/bin' });
+assert.equal(input.OPENAI_API_KEY, 'sk-test');
+assert.equal(input.CODEX_API_KEY, 'test');
 ```
 
 - [ ] **Step 2: Run the tests and verify the missing runner fails**
@@ -301,15 +302,15 @@ Run: `npm run test:evals`
 
 Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `run-workout-evals.mjs`.
 
-- [ ] **Step 3: Implement the guard and runner**
+- [ ] **Step 3: Implement the sanitizer and runner**
 
-Implement `assertSubscriptionEnvironment` to throw a single actionable error naming every present API-key variable. When executed as the main module, call the guard before creating `evals/results`, then use `spawnSync` without a shell to invoke the local Promptfoo binary with the arguments above, inheriting stdio and the current environment. Exit with Promptfoo's status. Add `evals/results/` to `.gitignore`.
+Implement `subscriptionEnvironment` to clone the parent environment and remove `OPENAI_API_KEY` and `CODEX_API_KEY`. When executed as the main module, use `spawnSync` without a shell to invoke the local Promptfoo binary with the arguments above, inheriting stdio and the sanitized child environment. Exit with Promptfoo's status. Add `evals/results/` to `.gitignore`.
 
 - [ ] **Step 4: Run all harness tests**
 
 Run: `npm run test:evals`
 
-Expected: PASS, including both API-key rejection cases.
+Expected: PASS, including automatic API-key removal without parent-environment mutation.
 
 - [ ] **Step 5: Commit the subscription-only runner**
 
@@ -413,11 +414,11 @@ npm run eval:validate   # Promptfoo schema/config validation; no model usage
 npm run eval:workout    # GPT-6 Luna, max effort, existing ChatGPT/Codex login
 ```
 
-Document that API-key variables must be unset, results are local and ignored, every case gets a temporary database, and V1 contract failures are expected until implementation catches up.
+Document that the wrapper removes API-key variables from the child process, results are local and ignored, every case gets a temporary database, and V1 contract failures are expected until implementation catches up.
 
 - [ ] **Step 6: Run the live contract suite through ChatGPT subscription**
 
-Run: `env -u OPENAI_API_KEY -u CODEX_API_KEY npm run eval:workout`
+Run: `npm run eval:workout`
 
 Expected: Promptfoo starts 18 isolated Codex SDK cases using `gpt-6-luna` at `max`; the command may exit nonzero because unsupported V1 behaviors fail, but it must produce `evals/results/latest.json` without authentication, MCP-startup, or fixture-leak errors.
 
