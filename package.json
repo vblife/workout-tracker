@@ -1,0 +1,16 @@
+{
+  "name": "workout-bot",
+  "private": true,
+  "engines": { "node": ">=22.22.0" },
+  "scripts": {
+    "test:evals": "node --test evals/tests/*.test.mjs",
+    "eval:validate": "promptfoo validate -c evals/workout-evals.yaml",
+    "eval:workout": "node evals/run-workout-evals.mjs"
+  },
+  "devDependencies": {
+    "@openai/codex-sdk": "0.162.1",
+    "better-sqlite3": "12.4.1",
+    "promptfoo": "0.124.1",
+    "yaml": "2.8.1"
+  }
+}
