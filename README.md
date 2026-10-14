@@ -33,6 +33,7 @@ Self-contained resources live in `server/ui/`: `report.html`, `progress.html`, a
 ```text
 server/             MCP protocol, SQLite migrations, domain logic, calculations
 server/ui/          negotiated report, progress, and HIIT resources
+server/workout.db   checked-in development database (not the production data path)
 skills/             nine vblife-workout-* agent skills
 evals/              the single workout-evals Promptfoo suite
 ```
