@@ -10,3 +10,5 @@ __pycache__/
 .worktrees/
 evals/results/
 node_modules/
+server/workout.db
+/workout.db
