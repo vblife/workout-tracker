@@ -7,3 +7,6 @@ __pycache__/
 .env
 *.pem
 *.key
+.worktrees/
+evals/results/
+node_modules/

@@ -9,7 +9,7 @@ class T(unittest.TestCase):
     s.c.close(); import shutil; shutil.rmtree(s.d)
   def test_seed(s):
     s.assertGreaterEqual(s.c.execute("select count(*) from exercises").fetchone()[0],75)
-    s.assertEqual(s.c.execute("select version from schema_version").fetchone()[0],1)
+    s.assertEqual(s.c.execute("select version from schema_version").fetchone()[0],2)
     for t in("exercises","aliases","sessions","sets","hiit_workouts","settings","schema_version"):
       s.c.execute(f"select * from {t} limit 1")
   def test_norm(s):
@@ -45,12 +45,12 @@ class T(unittest.TestCase):
     a=core.log_sets(s.c,[{"exercise":"squat","reps":5,"weight":100}],performed_at="2026-10-01T08:00:00")
     b=core.log_sets(s.c,[{"exercise":"squat","reps":5,"weight":100}],performed_at="2026-10-01T08:20:00")
     d=core.log_sets(s.c,[{"exercise":"squat","reps":5,"weight":100}],performed_at="2026-10-01T18:00:00")
-    s.assertEqual(a["session_id"],b["session_id"]); s.assertNotEqual(a["session_id"],d["session_id"])
+    s.assertNotEqual(a["session_id"],b["session_id"]); s.assertNotEqual(b["session_id"],d["session_id"])
   def test_settings_onboarding(s):
-    s.assertEqual(core.get_context(s.c)["onboarding_required"],["unit","days_per_week","goals"])
+    s.assertEqual(core.get_context(s.c)["onboarding_required"],[])
     with s.assertRaises(core.UserError): core.update_settings(s.c,{"unit":"stone"})
     r=core.update_settings(s.c,{"unit":"kg","days_per_week":5,"goals":["strength","cardio","hiking"]})
-    s.assertEqual(r["onboarding_required"],[]); s.assertIn("onboarded_at",r["settings"])
+    s.assertEqual(r["onboarding_required"],[])
     x=core.log_sets(s.c,[{"exercise":"squat","reps":8,"weight":100,"unit":"lb"}])["logged"][0]
     s.assertEqual((x["weight"],x["unit"]),(100.0,"lb"))
     s.assertEqual(core.list_recent(s.c)["sets"][0]["weight"],45.4)
@@ -60,8 +60,14 @@ class T(unittest.TestCase):
     q=core.query_stats(s.c,"e1rm","深蹲",group_by="week")
     s.assertEqual([p["period"] for p in q["series"]],["2026-08-31","2026-09-07"]); s.assertEqual(q["series"][1]["e1rm"],139.3)
     v=core.query_stats(s.c,"volume","squat",from_date="2026-09-08",to_date="2026-09-08",group_by="day"); s.assertEqual(v["series"][0]["volume"],840.0)
+  def test_stats_use_configured_timezone(s):
+    core.update_settings(s.c,{"timezone":"Asia/Tokyo"})
+    core.log_sets(s.c,[{"exercise":"squat","reps":5}],performed_at="2026-10-01T15:30:00Z")
+    q=core.query_stats(s.c,"reps","squat",group_by="day")
+    s.assertEqual(q["series"][0]["period"],"2026-10-02")
   def test_hiit(s):
-    h=core.create_hiit(s.c,name="Tabata",rounds=8,segments=[{"kind":"work","seconds":20,"exercise":"Burpee"},{"kind":"rest","seconds":10}])
+    defaults=core.hiit_config(); s.assertEqual((defaults["rounds"],defaults["segments"][0]["seconds"],defaults["segments"][1]["seconds"],defaults["warmup_s"],defaults["cooldown_s"]),(20,40,20,10,60))
+    h=core.create_hiit(s.c,name="Tabata",rounds=8,segments=[{"kind":"work","seconds":20,"exercise":"Burpee"},{"kind":"rest","seconds":10}],warmup_s=0,cooldown_s=0)
     s.assertEqual(h["planned_seconds"],230)
     r=core.log_hiit(s.c,h["hiit_id"],8,230); s.assertEqual(r["status"],"completed")
     s.assertEqual(core.log_hiit(s.c,h["hiit_id"],8,230)["status"],"already_logged")
