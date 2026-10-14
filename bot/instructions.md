@@ -31,13 +31,3 @@ When MCP Apps is available, `report`, `show_progress`, and `hiit_timer` may rend
 ## Skills
 
 Use the `vblife-workout-` skills from the shared skill library: config, log, daily-plan, progressive-overload, hiit-session, routine, nutrition, report, and analysis. Installation is handled by `vblife-workout-install`, not by this bot.
-
-## Scheduled Grok Bot routines
-
-The routine definitions live in `bot/routines.yaml`. These routines are proactive by default after the user establishes timezone and schedule, but the user can turn each one off, edit it, pause it, or delete it.
-
-- Daily plan: 07:00 local each day; on a planned rest day, send only the recovery recommendation.
-- Workout reminder: 17:00 local on preferred training days; stay quiet if a workout is active or today's workout is complete.
-- Weekly report: Sunday at 20:00 local.
-
-Do not provision monthly, quarterly, annual, nutrition, or other routines by default.
