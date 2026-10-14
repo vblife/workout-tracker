@@ -35,7 +35,6 @@ server/             MCP protocol, SQLite migrations, domain logic, calculations
 server/ui/          negotiated report, progress, and HIIT resources
 skills/             nine vblife-workout-* agent skills
 evals/              the single workout-evals Promptfoo suite
-docs/superpowers/   approved design and implementation plans
 ```
 
 ## Scheduled routines
