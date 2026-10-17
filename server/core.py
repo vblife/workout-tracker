@@ -345,8 +345,11 @@ def update_activity(c,session_id,duration_min,distance=None,distance_unit=None,e
     c.execute("UPDATE sessions SET duration_min=?,distance_km=?,elevation_gain_m=?,rpe=?,notes=?,title=? WHERE id=?",
       (duration_min,km,elevation,rpe if rpe is not None else row["rpe"],notes if notes is not None else row["notes"],title if title is not None else row["title"],session_id))
     estimate=calories.estimate_session(c,session_id)
-  return {"status":"updated","session_id":session_id,"duration_min":duration_min,"distance":distance if distance is not None else (km/MI if du=="mi" else km),
-    "distance_unit":du,"elevation_gain":elevation_gain if elevation_gain is not None else (elevation/FT if eu=="ft" and elevation is not None else elevation),"elevation_unit":eu,"calorie_estimate":estimate}
+  out_distance=distance if distance is not None else (None if km is None else (km/MI if du=="mi" else km))
+  out_elevation=elevation_gain if elevation_gain is not None else (None if elevation is None else (elevation/FT if eu=="ft" else elevation))
+  return {"status":"updated","session_id":session_id,"duration_min":duration_min,
+    "distance":out_distance,"distance_unit":du if out_distance is not None else None,
+    "elevation_gain":out_elevation,"elevation_unit":eu if out_elevation is not None else None,"calorie_estimate":estimate}
 def delete_session(c,session_id):
   r=c.execute("SELECT * FROM sessions WHERE id=?",(session_id,)).fetchone()
   if not r: raise UserError("no such session")
