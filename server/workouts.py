@@ -211,10 +211,10 @@ def merge_sessions(c, source_session_id, target_session_id, confirmed=False):
             c.execute("UPDATE workout_session_items SET session_id=?,position=? WHERE id=?", (target_session_id, position, item[0]))
         c.execute("UPDATE sets SET session_id=?,session_item_id=NULL WHERE session_id=?", (target_session_id, source_session_id))
         c.execute("UPDATE hiit_workouts SET session_id=? WHERE session_id=?", (target_session_id, source_session_id))
-        c.execute("""UPDATE sessions SET type=?,duration_min=coalesce(duration_min,0)+?,distance_km=coalesce(distance_km,0)+?,
-            elevation_gain_m=coalesce(elevation_gain_m,0)+? WHERE id=?""",
+        c.execute("""UPDATE sessions SET type=?,duration_min=coalesce(duration_min,0)+?,distance_km=CASE WHEN distance_km IS NULL AND ? IS NULL THEN NULL ELSE coalesce(distance_km,0)+coalesce(?,0) END,
+            elevation_gain_m=CASE WHEN elevation_gain_m IS NULL AND ? IS NULL THEN NULL ELSE coalesce(elevation_gain_m,0)+coalesce(?,0) END WHERE id=?""",
             (target["type"] if target["type"] == source["type"] else "mixed", source["duration_min"] or 0,
-             source["distance_km"] or 0, source["elevation_gain_m"] or 0, target_session_id))
+             source["distance_km"], source["distance_km"], source["elevation_gain_m"], source["elevation_gain_m"], target_session_id))
         c.execute("DELETE FROM sessions WHERE id=?", (source_session_id,))
         _refresh_bounds(c, target_session_id)
         from calories import estimate_session
