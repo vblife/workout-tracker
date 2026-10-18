@@ -14,7 +14,7 @@ After exercises and timing are confirmed, call `hiit_timer` with ordered work/re
 
 If the client cannot render the interactive timer (for example a chat without MCP Apps, or the user says they don't see a timer), do not just guide intervals in prose. Immediately generate a self-contained HTML timer file and send it as an attachment, without waiting to be asked:
 
-1. Write one HTML file (e.g. `/workspace/hiit-timer.html`) with inline CSS and JS only, no external assets, using the exact same segments returned by `hiit_timer`: warm-up, each work segment labeled with its exercise name and index (e.g. `练 3/20`), rest segments showing the next exercise, and the cooldown.
+1. Write one HTML file (e.g. `/workspace/hiit-timer.html`) with inline CSS and JS only, no external assets, using the exact same segments returned by `hiit_timer`: warm-up, each work segment labeled with its exercise name and index (e.g. `Work 3/20`), rest segments showing the next exercise, and the cooldown.
 2. Requirements: big countdown readable on a phone; current phase and exercise name; an "up next" line; distinct background colors for warm-up, work, rest, and cooldown; Start/Pause and Skip buttons; short Web Audio beeps on the last 3 seconds and at each transition; a finished screen at the end. Use the user's language for labels.
 3. Send the file as an attachment, then one short message: open it in a browser, press Start, and tell me when you finish or where you stopped so I can log it.
 
