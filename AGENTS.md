@@ -5,6 +5,7 @@ These rules apply to every coding agent (Grok Bot, Cursor, or any other) working
 ## Git and PRs
 - Never push to `main`. Work on a feature branch and open a pull request.
 - Never merge your own PR. The reviewer agent merges automatically once tests pass and its review is clean.
+- Auto-merge does not apply to risky changes. Anything touching secrets or credentials, deploy config, or production data paths and schema migrations (e.g. the workout database) needs Charles's explicit approval before merge.
 - Keep each PR to one change. Do not mix unrelated edits.
 - Do not post GitHub comments or replies unless the repo owner explicitly asked for that exact comment.
 
