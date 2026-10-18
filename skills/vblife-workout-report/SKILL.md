@@ -22,7 +22,7 @@ Use `show_progress` for a requested lift or focused chart. All numbers and units
 Do this for every report (day, week, month, quarter, year, or all), even when an MCP Apps dashboard renders, because Grok Bot on mobile doesn't support MCP Apps yet:
 
 1. Call `report` normally so a compatible client can render the MCP Apps dashboard in the app.
-2. Build a standalone HTML file from the repo template `server/ui/report.html` in the workout-tracker checkout (on the box: `/home/vblife/workout/server/ui/report.html`). Never write a custom layout. Insert `<script>window.openai={toolOutput:<report JSON>};</script>` before the template's first `<script>` tag, using the exact structured `report` result with `ensure_ascii=False`.
+2. Build a standalone HTML file from the repo template `server/ui/report.html` (relative to the workout-tracker repo root, two levels above this skill folder). Never write a custom layout. Write the exact structured `report` result to a JSON file, then run `python server/render_report_html.py <report.json> <out.html>` from the repo root (override the template with `--template` or `WORKOUT_REPORT_TEMPLATE`). The script inserts `<script>window.openai={toolOutput:<report JSON>};</script>` before the template's first `<script>` tag and escapes `<`, `>`, and `&` in the JSON so data such as `</script>` or `<!--` cannot break the page.
 3. Save it under `/workspace/` as `workout-report-<period>-<anchor-or-label>.html`, then send it in chat as a `file://` attachment so the user can tap it open.
 4. Keep the file local. Never upload it to Google Drive or any other external service or link-sharing host.
 5. If the template is missing, say so, and still send the text summary.
