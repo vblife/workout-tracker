@@ -1,21 +1,25 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark">
 <title>Timer</title><style>
-:root{color-scheme:light dark;--fg:#111;--muted:#555;--btn:#fff;--line:#8888}
-@media(prefers-color-scheme:dark){:root{--fg:#f5f7fa;--muted:#b8c0cc;--btn:#202631}body.idle{background:#14181f}body.ready{background:#283957}body.work{background:#5a2626}body.rest{background:#1f4a2c}body.warmup,body.cooldown{background:#2c3a5c}body.interval{background:#1d2a3a}body.done{background:#3a2d12}}
-*{box-sizing:border-box}html,body{height:100%}
-body{margin:0;font-family:-apple-system,system-ui,sans-serif;color:var(--fg);text-align:center;transition:background .3s;-webkit-user-select:none;user-select:none;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
-body.idle{background:#f2f4f7}body.ready{background:#e3ecff}body.work{background:#ffe1e1}body.rest{background:#dcf5dc}body.warmup,body.cooldown{background:#e6ecff}body.interval{background:#eaf2fb}body.done{background:#fff1cc}
+:root{color-scheme:dark;
+ /* Fixed dark palette for every state (tested for WCAG AA contrast in test_render_timer_html.py). */
+ --fg:#f5f7fa;--muted:#c9d1dc;--accent:#8ccfff;
+ --bg-idle:#10151c;--bg-ready:#13213a;--bg-work:#3d1518;--bg-rest:#0e2b1a;--bg-warmup:#1a2342;--bg-cooldown:#1a2342;--bg-interval:#132233;--bg-paused:#22262e;--bg-done:#1b2433;
+ --btn-bg:#2b3445;--btn-fg:#f5f7fa;--btn-line:#5b6678;--start-bg:#1e6b2a;--start-fg:#ffffff;--pause-bg:#8a4a00;--pause-fg:#ffffff;--disabled-bg:#1f2632;--disabled-fg:#9aa5b5;
+ --bar-track:#6f7b8f;--bar-fill:#d6efff}
+*{box-sizing:border-box}html{background:var(--bg-idle)}html,body{height:100%}
+body{margin:0;font-family:-apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg-idle);text-align:center;transition:background .3s;-webkit-user-select:none;user-select:none;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
+body.idle{background:var(--bg-idle)}body.ready{background:var(--bg-ready)}body.work{background:var(--bg-work)}body.rest{background:var(--bg-rest)}body.warmup{background:var(--bg-warmup)}body.cooldown{background:var(--bg-cooldown)}body.interval{background:var(--bg-interval)}body.paused{background:var(--bg-paused)}body.done{background:var(--bg-done)}
 main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.2vh;max-width:760px;margin:auto}
-#label{font-size:clamp(20px,6vw,34px);font-weight:600;overflow-wrap:anywhere}
+#label{font-size:clamp(20px,6vw,34px);font-weight:600;color:var(--fg);overflow-wrap:anywhere}
 #phase{font-size:clamp(18px,5.5vw,30px);font-weight:700;letter-spacing:.04em;min-height:1.2em;overflow-wrap:anywhere}
-#time{font-size:clamp(72px,30vw,240px);font-weight:750;font-variant-numeric:tabular-nums;line-height:1}
+#time{color:var(--fg);font-size:clamp(72px,30vw,240px);font-weight:750;font-variant-numeric:tabular-nums;line-height:1}
 #sub,#next{font-size:clamp(15px,4.4vw,22px);color:var(--muted);min-height:1.3em;overflow-wrap:anywhere}
-#bar{width:100%;height:10px;background:#0002;border-radius:5px;overflow:hidden}#bar i{display:block;height:100%;width:0;background:currentColor;opacity:.6}
+#bar{width:100%;height:12px;background:var(--bar-track);border-radius:6px;overflow:hidden}#bar i{display:block;height:100%;width:0;background:var(--bar-fill)}
 .btns{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:1vh}
-button{font:inherit;font-size:clamp(20px,6vw,30px);font-weight:650;min-width:38vw;max-width:300px;padding:.55em 1em;border-radius:16px;border:1px solid var(--line);background:var(--btn);color:var(--fg);touch-action:manipulation}
-button#start{background:#2e7d32;color:#fff;border-color:#2e7d32}button#start.pause{background:#b26a00;border-color:#b26a00}
-button:disabled{opacity:.4}.toggle{font-size:clamp(15px,4.2vw,20px);display:flex;align-items:center;gap:8px;margin-top:1vh}.toggle input{width:24px;height:24px}
+button{font:inherit;font-size:clamp(20px,6vw,30px);font-weight:650;min-width:38vw;max-width:300px;padding:.55em 1em;border-radius:16px;border:1px solid var(--btn-line);background:var(--btn-bg);color:var(--btn-fg);touch-action:manipulation}
+button#start{background:var(--start-bg);color:var(--start-fg);border-color:var(--start-bg)}button#start.pause{background:var(--pause-bg);color:var(--pause-fg);border-color:var(--pause-bg)}
+button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-color:var(--btn-line)}.toggle{color:var(--fg);font-size:clamp(15px,4.2vw,20px);display:flex;align-items:center;gap:8px;margin-top:1vh}.toggle input{width:24px;height:24px;accent-color:var(--accent)}
 #status,#msg{font-size:clamp(12px,3.6vw,16px);color:var(--muted);min-height:1.2em}
 #nosleep{position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none}
 </style></head><body class="idle"><main>
@@ -76,9 +80,19 @@ var intervals=buildIntervals(cfg),rounds=(cfg.rounds|0)||intervals.reduce(functi
 /* Timeline: optional ready segment followed by the intervals. */
 var segs=[],T=0;if(ready>0){segs.push({kind:"ready",seconds:ready,label:"",round:0,ready:true})}
 intervals.forEach(function(x){segs.push(x)});segs.forEach(function(s){s.start=T;T+=s.seconds;s.end=T});
-var cues=[];(function(){var i,j;for(i=0;i<segs.length;i++){var s=segs[i],last=i===segs.length-1,nx=segs[i+1];
- for(j=3;j>=1;j--){var at=s.end-j;if(at>s.start+1e-6)cues.push({t:at,type:s.ready?"ready":"count",n:j})}
- cues.push({t:s.end,type:last?"finish":(s.ready||nx.kind==="work"||nx.kind==="interval"?"go":(nx.kind==="rest"?"rest":"next")),seg:i+1})}})();
+/* cue-schedule:begin (pure; also exercised by test_render_timer_html.py)
+   Every time counting starts (end of the ready period, each interval change) and at the finish, play
+   short, short, long: shorts 2 s and 1 s before the boundary, the long beep starting exactly on 0.
+   This replaces separate 3-2-1 beeps. Transitions into rest/cool-down use the same shape, lower pitch. */
+function buildCues(segs){var cues=[],i,j;
+ if(segs.length&&!segs[0].ready)cues.push({t:0,type:"long",tone:"main",event:"begin",seg:0});
+ for(i=0;i<segs.length;i++){var s=segs[i],last=i===segs.length-1,nx=segs[i+1],
+   tone=!last&&(nx.kind==="rest"||nx.kind==="cooldown")?"rest":"main",ev=last?"finish":(s.ready?"begin":"next");
+  for(j=2;j>=1;j--){var at=s.end-j;if(at>s.start+1e-6)cues.push({t:at,type:"short",tone:tone,n:j,event:ev})}
+  cues.push({t:s.end,type:"long",tone:tone,event:ev,seg:i+1})}
+ return cues}
+/* cue-schedule:end */
+var cues=buildCues(segs);
 /* ---------- state (timestamp based: correct after throttling or suspension) ---------- */
 var started=false,running=false,finished=false,acc=0,t0=0,lastSeg=-1,lastCue=-1;
 function now(){return Date.now()}
@@ -86,20 +100,16 @@ function elapsed(){var e=acc+(running?(now()-t0)/1000:0);return Math.min(Math.ma
 function segAt(e){for(var i=0;i<segs.length;i++)if(e<segs[i].end)return i;return segs.length}
 /* ---------- audio: one AudioContext, cues pre-scheduled at absolute times ---------- */
 var ac=null,master=null,nodes=[],anchor=null,schedUntil=-1;
-function ensureAudio(){if(!SOUND)return null;try{if(!ac){var C=window.AudioContext||window.webkitAudioContext;if(!C)return null;ac=new C();master=ac.createGain();master.gain.value=0.9;master.connect(ac.destination);
+function ensureAudio(){if(!SOUND)return null;try{if(!ac){var C=window.AudioContext||window.webkitAudioContext;if(!C)return null;ac=new C();master=ac.createGain();master.gain.value=0.8;master.connect(ac.destination);
   ac.onstatechange=function(){if(running&&ac.state==="running")reschedule();status()}}
   if(ac.state!=="running"&&ac.resume)ac.resume().catch(function(){});
   var b=ac.createBuffer(1,1,22050),s=ac.createBufferSource();s.buffer=b;s.connect(master);s.start(0);}catch(e){}return ac}
-function tone(f,at,d,vol,type){var o=ac.createOscillator(),g=ac.createGain();o.type=type||"sine";o.frequency.setValueAtTime(f,at);
- g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(vol,at+0.012);g.gain.setValueAtTime(vol,Math.max(at+0.013,at+d-0.04));g.gain.linearRampToValueAtTime(0,at+d);
- o.connect(g);g.connect(master);o.start(at);o.stop(at+d+0.02);nodes.push(o);o.onended=function(){var i=nodes.indexOf(o);if(i>=0)nodes.splice(i,1);try{o.disconnect();g.disconnect()}catch(e){}}}
-function playCue(c,at){switch(c.type){
- case"ready":tone(660,at,0.14,0.7);break;
- case"count":tone(880,at,0.14,0.75);break;
- case"go":tone(880,at,0.16,0.9,"square");tone(1320,at+0.17,0.38,0.9,"square");break;
- case"rest":tone(1320,at,0.18,0.85);tone(660,at+0.19,0.38,0.85);break;
- case"next":tone(1100,at,0.4,0.85);break;
- case"finish":tone(660,at,0.18,0.9,"square");tone(880,at+0.2,0.18,0.9,"square");tone(1320,at+0.4,0.18,0.9,"square");tone(1760,at+0.62,0.8,0.9,"square");break}}
+/* Soft sine tones only: gentle attack and release, moderate gain, 392-659 Hz. */
+var TONES={main:{short:523.25,long:659.25},rest:{short:440,long:392}},DUR={short:0.16,long:0.7},GAIN={short:0.28,long:0.32};
+function tone(f,at,d,peak){var o=ac.createOscillator(),g=ac.createGain();o.type="sine";o.frequency.setValueAtTime(f,at);
+ g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(peak,at+0.03);g.gain.setValueAtTime(peak,at+Math.max(0.04,d*0.4));g.gain.exponentialRampToValueAtTime(0.001,at+d);g.gain.linearRampToValueAtTime(0,at+d+0.02);
+ o.connect(g);g.connect(master);o.start(at);o.stop(at+d+0.05);nodes.push(o);o.onended=function(){var i=nodes.indexOf(o);if(i>=0)nodes.splice(i,1);try{o.disconnect();g.disconnect()}catch(e){}}}
+function playCue(c,at){var f=(TONES[c.tone]||TONES.main)[c.type];if(f)tone(f,at,DUR[c.type],GAIN[c.type])}
 function clearScheduled(){nodes.slice().forEach(function(o){o.onended=null;try{o.stop(0)}catch(e){}try{o.disconnect()}catch(e){}});nodes=[];anchor=null;schedUntil=-1}
 function topUp(){if(!ac||!anchor||!running)return;var e=elapsed(),until=Math.min(T,e+HORIZON);if(until<=schedUntil)return;
  for(var i=0;i<cues.length;i++){var c=cues[i];if(c.t>schedUntil+1e-6&&c.t<=until+1e-6&&c.t>=e-0.05){playCue(c,Math.max(ac.currentTime+0.005,anchor.ctx+(c.t-anchor.el)))}}schedUntil=until}
@@ -137,7 +147,7 @@ function vibe(p){if(VIBE&&navigator.vibrate)try{navigator.vibrate(p)}catch(e){}}
 /* ---------- UI ---------- */
 function phaseText(s){if(!s)return"";if(s.ready)return t("ready");var k=t(s.kind);return s.label?(k&&s.kind!=="interval"?k+" \u00b7 "+s.label:s.label):k}
 function draw(){var e=elapsed(),i=segAt(e),s=segs[i],b=document.body;
- if(!started){s=segs[0];b.className="idle"}else if(finished||!s){b.className="done"}else b.className=s.ready?"ready":s.kind;
+ if(!started){s=segs[0];b.className="idle"}else if(finished||!s){b.className="done"}else b.className=running?(s.ready?"ready":s.kind):"paused";
  $("label").textContent=label;
  if(finished){$("phase").textContent=t("done");$("time").textContent=fmt(0);$("sub").textContent=t("total",{t:fmt(T-ready)});$("next").textContent=""}
  else{var cur=started?s:(segs[0].ready&&segs[1]?segs[1]:segs[0]),rem=started?s.end-e:cur.seconds;
@@ -149,7 +159,7 @@ function draw(){var e=elapsed(),i=segAt(e),s=segs[i],b=document.body;
  $("skip").hidden=intervals.length<2;$("skip").disabled=!started||finished}
 function onTransitions(e){var i=segAt(e),fresh;
  for(var c=lastCue+1;c<cues.length&&cues[c].t<=e+1e-6;c++){fresh=e-cues[c].t<1.5;var q=cues[c];
-  if(fresh){if(q.type==="ready"||q.type==="count")say(q.n);else if(q.type==="go"){say(t("go"));vibe(200)}else if(q.type==="rest"||q.type==="next"){say(phaseText(segs[q.seg]));vibe(200)}else if(q.type==="finish"){say(t("done"));vibe([300,100,300,100,600])}}
+  if(fresh){if(q.type==="short")say(q.n);else if(q.event==="begin"){say(t("go"));vibe(200)}else if(q.event==="next"){say(phaseText(segs[q.seg]));vibe(200)}else if(q.event==="finish"){say(t("done"));vibe([300,100,300,100,600])}}
   lastCue=c}
  if(i!==lastSeg){lastSeg=i;mediaSession()}}
 function tick(){if(started&&!finished){var e=elapsed();onTransitions(e);if(e>=T-1e-6){complete();return}if(running)driftCheck()}draw()}
