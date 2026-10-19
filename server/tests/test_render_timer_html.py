@@ -168,10 +168,6 @@ class TimerConfigTest(unittest.TestCase):
                 self.assertFalse(os.path.exists(out), args)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 def _hex_luminance(color):
     color = color.lstrip("#")
     if len(color) == 3:
@@ -275,3 +271,7 @@ class TimerSoundTest(unittest.TestCase):
         # A 2 s ready period only has room for one short beep before the long one.
         self.assertEqual(self._cues([{"kind": "ready", "ready": True, "seconds": 2}, {"kind": "interval", "seconds": 1}]), [
             (1, "short", "main", "begin"), (2, "long", "main", "begin"), (3, "long", "main", "finish")])
+
+
+if __name__ == "__main__":
+    unittest.main()
