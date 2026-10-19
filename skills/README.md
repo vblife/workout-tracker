@@ -15,4 +15,4 @@ Workout Bot uses exactly these ten agent skills:
 | `vblife-workout-analysis` | Open-ended trend and evidence analysis |
 | `vblife-workout-install` | Installs or updates the bot, connector, skills, and routines from this repository |
 
-Every `SKILL.md` is English-only so the instructions remain portable. Runtime input may use English or Chinese exercise aliases, and Workout Bot replies in the user's language. Generated timer pages are the exception: their UI and labels are always English.
+Every `SKILL.md` is English-only so the instructions remain portable. Runtime input may use English or Chinese exercise aliases, and Workout Bot replies in the user's language. Generated timer pages are the exception: their UI and labels are English unless the user's stated language preference is Chinese, in which case the bot passes `lang: zh` and a Chinese label.

@@ -28,7 +28,7 @@ args: [/home/vblife/workout/server/server.py, --stdio]
 
 Self-contained resources live in `server/ui/`: `report.html`, `progress.html`, and `hiit.html`. The server inspects client capabilities during MCP initialization. Compatible MCP Apps clients receive resource metadata; other clients receive complete text and structured data with no broken interface or public-page fallback.
 
-`server/ui/timer.html` is the standard countdown timer for chats without MCP Apps. `server/render_timer_html.py` renders it into one self-contained local HTML file (single countdown, work/rest sequence, or a `hiit_timer` result) that the bot sends as a `file://` attachment. The timer UI is always English (there is no language option), and the bot passes English labels. See `docs/timer.md` for config, cues, and screen-off behavior per platform.
+`server/ui/timer.html` is the standard countdown timer for chats without MCP Apps. `server/render_timer_html.py` renders it into one self-contained local HTML file (single countdown, work/rest sequence, or a `hiit_timer` result) that the bot sends as a `file://` attachment. The timer UI is English by default; `lang: zh` (`--lang zh`) gives a Chinese UI when the user's stated language preference is Chinese. See `docs/timer.md` for config, cues, and screen-off behavior per platform.
 
 ## Layout
 

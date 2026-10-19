@@ -34,12 +34,17 @@ button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-co
 /* Self-contained countdown timer. No network requests. Config comes from
    window.openai.toolOutput (injected by server/render_timer_html.py), then the
    URL query string, then the URL hash (base64url JSON or key=value pairs). */
-/* UI text is always English (fixed by design; there is no locale switch). */
-var L={start:"Start",pause:"Pause",resume:"Resume",reset:"Reset",skip:"Skip",ready:"Get ready",work:"Work",rest:"Rest",warmup:"Warm-up",cooldown:"Cool-down",interval:"",done:"Done!",next:"Next",round:"Round {r}/{n}",left:"{t} left",keepAwake:"Keep screen on",go:"Go",
+/* UI text tables. English is the default; "zh" is the only other locale. Unknown values fall back to English. */
+var STRINGS={
+ en:{start:"Start",pause:"Pause",resume:"Resume",reset:"Reset",skip:"Skip",ready:"Get ready",work:"Work",rest:"Rest",warmup:"Warm-up",cooldown:"Cool-down",interval:"",done:"Done!",next:"Next",round:"Round {r}/{n}",left:"{t} left",keepAwake:"Keep screen on",go:"Go",
   wlLock:"Screen stays on (wake lock)",wlVideo:"Screen stays on (video fallback)",wlOff:"Screen may turn off; audio cues are pre-scheduled",wlNone:"Keep-screen-on is not available here; leave the screen on for the most reliable cues",
-  audioOff:"Sound is off or blocked; tap Resume to re-enable",total:"Total {t}",tellChat:"Tell the chat you finished HIIT #{id} so it can be logged",badLink:"Bad timer link; using defaults"};
+  audioOff:"Sound is off or blocked; tap Resume to re-enable",total:"Total {t}",tellChat:"Tell the chat you finished HIIT #{id} so it can be logged",badLink:"Bad timer link; using defaults"},
+ zh:{start:"\u5f00\u59cb",pause:"\u6682\u505c",resume:"\u7ee7\u7eed",reset:"\u91cd\u7f6e",skip:"\u8df3\u8fc7",ready:"\u51c6\u5907",work:"\u8bad\u7ec3",rest:"\u4f11\u606f",warmup:"\u70ed\u8eab",cooldown:"\u653e\u677e",interval:"",done:"\u5b8c\u6210!",next:"\u4e0b\u4e00\u4e2a",round:"\u7b2c {r}/{n} \u8f6e",left:"\u5269\u4f59 {t}",keepAwake:"\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae",go:"\u5f00\u59cb",
+  wlLock:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (wake lock)",wlVideo:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (video)",wlOff:"\u5c4f\u5e55\u53ef\u80fd\u5173\u95ed\uff1b\u63d0\u793a\u97f3\u5df2\u9884\u5148\u5b89\u6392",wlNone:"\u6b64\u5904\u65e0\u6cd5\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae\uff0c\u8bf7\u5c3d\u91cf\u4e0d\u8981\u9501\u5c4f",
+  audioOff:"\u58f0\u97f3\u88ab\u5173\u95ed\u6216\u963b\u6b62\uff0c\u8bf7\u70b9\u201c\u7ee7\u7eed\u201d\u91cd\u65b0\u542f\u7528",total:"\u603b\u8ba1 {t}",tellChat:"\u8bf7\u5728\u804a\u5929\u4e2d\u544a\u8bc9\u6211\u5df2\u5b8c\u6210 HIIT #{id}\uff0c\u4ee5\u4fbf\u8bb0\u5f55",badLink:"\u94fe\u63a5\u65e0\u6548\uff0c\u4f7f\u7528\u9ed8\u8ba4\u8bbe\u7f6e"}
+};
 var KINDS={work:1,rest:1,warmup:1,cooldown:1,interval:1};
-var DEF={label:"Timer",duration_s:60,ready_s:5,sound:true,speech:false,vibrate:true,keep_awake:true};
+var DEF={label:"Timer",duration_s:60,ready_s:5,lang:"en",sound:true,speech:false,vibrate:true,keep_awake:true};
 var HORIZON=1200,MAX_INTERVALS=2000,MAX_TOTAL=86400;
 var $=function(i){return document.getElementById(i)};
 function fmt(s){s=Math.max(0,Math.ceil(s-1e-6));var h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return(h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0")}
@@ -48,7 +53,7 @@ function bool(v,d){if(v===undefined||v===null||v==="")return d;if(typeof v==="bo
 function text(v){return v===undefined||v===null?"":String(v).slice(0,200)}
 var cfg={},msgs=[];
 function merge(src){if(!src||typeof src!=="object")return;for(var k in src)if(Object.prototype.hasOwnProperty.call(src,k))cfg[k]=src[k]}
-function fromParams(ps){var o={},map={label:"label",duration:"duration_s",duration_s:"duration_s",ready:"ready_s",ready_s:"ready_s",sound:"sound",speech:"speech",vibrate:"vibrate",keep_awake:"keep_awake"};
+function fromParams(ps){var o={},map={label:"label",duration:"duration_s",duration_s:"duration_s",ready:"ready_s",ready_s:"ready_s",lang:"lang",sound:"sound",speech:"speech",vibrate:"vibrate",keep_awake:"keep_awake"};
  ps.forEach(function(v,k){if(map[k])o[map[k]]=v});if(o.duration_s!==undefined){o.duration_s=sec(o.duration_s);delete cfg.intervals;delete cfg.rounds;delete cfg.segments}if(o.ready_s!==undefined)o.ready_s=sec(o.ready_s);return o}
 function loadConfig(){merge(DEF);
  try{if(window.openai&&window.openai.toolOutput)merge(window.openai.toolOutput)}catch(e){}
@@ -67,6 +72,7 @@ function buildIntervals(c){var out=[],i,r;
  if(!out.length)add("interval",sec(c.duration_s)>0?c.duration_s:DEF.duration_s,"",0);
  out=out.slice(0,MAX_INTERVALS);var tot=0;out=out.filter(function(x){tot+=x.seconds;return tot<=MAX_TOTAL||x===out[0]});return out}
 loadConfig();
+var LANG=Object.prototype.hasOwnProperty.call(STRINGS,cfg.lang)?cfg.lang:"en",L=STRINGS[LANG];
 function t(key,vars){var s=L[key]||"";if(vars)for(var v in vars)s=s.split("{"+v+"}").join(vars[v]);return s}
 var label=text(cfg.label||cfg.name)||"Timer",ready=sec(cfg.ready_s);ready=ready>=0?Math.min(ready,60):DEF.ready_s;
 var SOUND=bool(cfg.sound,true),SPEECH=bool(cfg.speech,false),VIBE=bool(cfg.vibrate,true);
@@ -136,7 +142,7 @@ function releaseAwake(){if(wl){try{wl.release()}catch(e){}wl=null}try{video.paus
 function status(){var s="";if(running&&wantAwake)s=awakeMode==="lock"?t("wlLock"):awakeMode==="video"?t("wlVideo"):awakeMode==="none"?t("wlNone"):"";else if(running)s=t("wlOff");
  if(running&&SOUND&&(!ac||ac.state!=="running"||(keep&&keep.paused)))s=(s?s+" \u00b7 ":"")+t("audioOff");$("status").textContent=s}
 /* ---------- speech (optional, best effort; beeps are the reliable path) ---------- */
-function say(x){if(!SPEECH||!x||!window.speechSynthesis||document.hidden)return;try{var u=new SpeechSynthesisUtterance(String(x));u.lang="en-US";u.rate=1.1;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
+function say(x){if(!SPEECH||!x||!window.speechSynthesis||document.hidden)return;try{var u=new SpeechSynthesisUtterance(String(x));u.lang=LANG==="zh"?"zh-CN":"en-US";u.rate=1.1;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function vibe(p){if(VIBE&&navigator.vibrate)try{navigator.vibrate(p)}catch(e){}}
 /* ---------- UI ---------- */
 function phaseText(s){if(!s)return"";if(s.ready)return t("ready");var k=t(s.kind);return s.label?(k&&s.kind!=="interval"?k+" \u00b7 "+s.label:s.label):k}
@@ -169,7 +175,7 @@ $("start").onclick=toggle;$("reset").onclick=reset;$("skip").onclick=skip;
 var aw=$("awake");aw.checked=wantAwake;aw.onchange=function(){wantAwake=aw.checked;if(wantAwake)acquireAwake();else releaseAwake();status()};
 document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"){if(running){acquireAwake();if(ac&&ac.state!=="running")ac.resume&&ac.resume().catch(function(){});if(keep&&keep.paused)keepPlay();reschedule()}tick()}});
 window.addEventListener("pageshow",tick);window.addEventListener("focus",tick);
-document.title=label;$("start").textContent=t("start");$("reset").textContent=t("reset");$("skip").textContent=t("skip");$("awakeLbl").textContent=t("keepAwake");
+document.title=label;document.documentElement.lang=LANG;$("start").textContent=t("start");$("reset").textContent=t("reset");$("skip").textContent=t("skip");$("awakeLbl").textContent=t("keepAwake");
 if(msgs.length)$("msg").textContent=t(msgs[0]);
 setInterval(tick,200);draw();
 window.__timer={segs:segs,cues:cues,total:T,cfg:cfg,labels:L,state:function(){return{started:started,running:running,finished:finished,elapsed:elapsed(),seg:segAt(elapsed()),awake:awakeMode,audio:ac&&ac.state,scheduled:nodes.length}}};
