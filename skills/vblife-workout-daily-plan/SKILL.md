@@ -12,3 +12,5 @@ description: Use when the user asks what to train today or on another day, reque
 The plan remains in conversation. Merely generating or showing it must not call `start_workout`, create a routine, create a session, or log sets. Only after the user explicitly says to start the accepted plan may you call `start_workout` with `mode: conversational_plan` and snapshot its items. Later pivots change only the active snapshot.
 
 All historical facts and prescriptions come from tools. Never log proposed work as completed.
+
+If the user wants a countdown or rest timer, generate it from the shared timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`; never hand-write a timer page.

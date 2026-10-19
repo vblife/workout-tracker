@@ -8,7 +8,7 @@ Workout Bot uses exactly these ten agent skills:
 | `vblife-workout-log` | Quick logs, lifecycle, calories, corrections, and safety |
 | `vblife-workout-daily-plan` | Ephemeral day plans and accepted-plan starts |
 | `vblife-workout-progressive-overload` | Server-backed next-session prescriptions |
-| `vblife-workout-hiit-session` | HIIT configuration, timer, and completion |
+| `vblife-workout-hiit-session` | HIIT configuration, timer, completion, and the shared countdown timer template |
 | `vblife-workout-routine` | Reusable routines and independent workout snapshots |
 | `vblife-workout-nutrition` | Meal-image estimates, confirmation, privacy, and goals |
 | `vblife-workout-report` | Readable period reports and dashboards |

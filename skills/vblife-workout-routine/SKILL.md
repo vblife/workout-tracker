@@ -13,3 +13,5 @@ description: Use when the user wants to create, save, inspect, edit, archive, re
 If another workout is active, ask the user to resume, finish, or abandon it; never replace it silently. During the workout, use `add_workout_item`, `replace_workout_item`, `reorder_workout_items`, or `set_workout_item_status` for a pivot. These tools change only the active snapshot. Change the source routine only on a separate explicit request.
 
 A conversational plan is not automatically a saved routine. Create one only when the user explicitly asks to reuse or save it.
+
+If the user wants a countdown or rest timer, generate it from the shared timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`; never hand-write a timer page.
