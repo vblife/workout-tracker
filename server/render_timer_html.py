@@ -179,11 +179,16 @@ def main(argv=None):
     a = p.parse_args(argv)
     config = {}
     if a.config:
-        if a.config == "-":
-            config = json.load(sys.stdin)
-        else:
-            with open(a.config, encoding="utf-8") as f:
-                config = json.load(f)
+        try:
+            if a.config == "-":
+                config = json.load(sys.stdin)
+            else:
+                with open(a.config, encoding="utf-8") as f:
+                    config = json.load(f)
+        except ValueError as e:
+            p.error(f"--config is not valid JSON: {e}")
+        if not isinstance(config, dict):
+            p.error("--config must be a JSON object")
     if a.duration is not None:
         for key in ("intervals", "segments", "rounds", "warmup_s", "cooldown_s"):
             config.pop(key, None)
@@ -196,7 +201,10 @@ def main(argv=None):
         config["lang"] = a.lang
     with open(a.template, encoding="utf-8") as f:
         template = f.read()
-    html = render(config, template)
+    try:
+        html = render(config, template)
+    except ValueError as e:
+        p.error(str(e))
     with open(a.out_html, "w", encoding="utf-8") as f:
         f.write(html)
 
