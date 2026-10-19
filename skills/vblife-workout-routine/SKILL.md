@@ -14,4 +14,4 @@ If another workout is active, ask the user to resume, finish, or abandon it; nev
 
 A conversational plan is not automatically a saved routine. Create one only when the user explicitly asks to reuse or save it.
 
-If the user wants a countdown or rest timer, generate it from the shared timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`; never hand-write a timer page.
+If the user wants a countdown or rest timer, generate it from the shared repo timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`: English UI and an English label, sent as a local `file://` HTML attachment, never hosted externally. Never hand-write a timer page.
