@@ -27,13 +27,24 @@ The generator validates the config and injects it the same way `render_report_ht
 | `intervals` | none | `[{"kind": "work"/"rest"/"warmup"/"cooldown"/"interval", "seconds": 40, "label": "Burpees"}]` |
 | `rounds`, `segments`, `warmup_s`, `cooldown_s` | none | A `hiit_timer` result; expanded like `hiit.html` (final rest of the last round skipped) |
 | `hiit_id` | none | Shown on the finished screen so the user can report it for `log_hiit` |
-| `lang` | `en` | Built-in label preset: `en` (Start/Pause/Reset...) or `zh` |
-| `strings` | none | Override any built-in label, e.g. `{"start": "Go"}` |
 | `sound`, `speech`, `vibrate`, `keep_awake` | `true`, `false`, `true`, `true` | Feature switches |
 
-The page also reads URL query parameters (`?duration=90&label=Plank&ready=3&lang=en`) and the URL hash
+The page also reads URL query parameters (`?duration=90&label=Plank&ready=3`) and the URL hash
 (base64url JSON like `hiit.html`, or `#duration=90&label=Plank`). Precedence: built-in defaults, then the
 injected config, then the query string, then the hash.
+
+## English only
+
+The timer UI is always fully English, even for users who chat in another language (Charles's request). The
+built-in text (Start, Pause, Resume, Reset, Skip, Get ready, Work, Rest, status lines) is fixed. The template
+has no locale table, and the generator rejects the old `lang` and `strings` keys and the `--lang` flag. They
+were removed rather than kept as an unused switch.
+
+Labels (`label`/`name` and interval or exercise labels) come from the caller and are shown exactly as given;
+the generator never rewrites or transliterates them. Bots must pass English labels. As a safety net, the CLI
+prints `warning: timer label is not English: ...` on stderr when a label contains CJK characters. It still
+writes the file, so a timer is never lost because of the label. The bot should regenerate with an English
+label when it sees the warning.
 
 ## Cues
 

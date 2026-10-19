@@ -17,4 +17,4 @@ Log completed work promptly; never log proposed work or something the user says 
 
 If the user reports sharp pain or injury, stop the movement, refuse to fabricate or encourage another set, and suggest qualified professional care without diagnosing. Setup is optional; missing preferences never block a log.
 
-If the user wants a countdown or rest timer, generate it from the shared timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`; never hand-write a timer page.
+If the user wants a countdown or rest timer, generate it from the shared repo timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`: English UI and an English label, sent as a local `file://` HTML attachment, never hosted externally. Never hand-write a timer page.

@@ -13,4 +13,4 @@ The plan remains in conversation. Merely generating or showing it must not call 
 
 All historical facts and prescriptions come from tools. Never log proposed work as completed.
 
-If the user wants a countdown or rest timer, generate it from the shared timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`; never hand-write a timer page.
+If the user wants a countdown or rest timer, generate it from the shared repo timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`: English UI and an English label, sent as a local `file://` HTML attachment, never hosted externally. Never hand-write a timer page.
