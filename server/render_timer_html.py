@@ -15,6 +15,7 @@ Usage:
   python server/render_timer_html.py out.html --config hiit.json      # hiit_timer result
   python server/render_timer_html.py out.html --duration 2:00 --label "..." --lang zh
   python server/render_timer_html.py out.html --work 40 --rest 20 --rounds 10,20 --label "HIIT 40/20"
+  python server/render_timer_html.py out.html --routine-id 3 --label "Circuit"   # saved hiit routine (read-only)
 
 Config keys (all optional):
   label        title shown on the page (hiit_timer "name" is accepted too)
@@ -223,6 +224,37 @@ def render(config, template_html):
     return _inject(normalize_config(config), template_html)
 
 
+def _routine_config(p, a):
+    """hiit_timer-equivalent config for a saved hiit routine, read through the server's data layer."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import sqlite3
+    import core
+    import db
+    import routines
+    rounds = None
+    if a.rounds is not None:
+        try:
+            values = parse_rounds_arg(a.rounds)
+        except ValueError as e:
+            p.error(str(e))
+        if len(values) != 1:
+            p.error("with --routine-id, --rounds takes one number; round options come from the routine")
+        rounds = values[0]
+    try:
+        c = db.connect_readonly(a.db)
+    except (FileNotFoundError, RuntimeError, sqlite3.Error) as e:
+        p.error(str(e))
+    try:
+        cfg = core.routine_hiit_config(routines.get_routine(c, a.routine_id), lang=a.lang or "en", rounds=rounds)
+    except core.UserError as e:
+        p.error(str(e))
+    finally:
+        c.close()
+    cfg["label"] = cfg.pop("name")
+    cfg.pop("planned_seconds", None)
+    return cfg
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("out_html")
@@ -234,6 +266,8 @@ def main(argv=None):
     p.add_argument("--rest", help="rest seconds between rounds (the final rest is skipped)")
     p.add_argument("--rounds", help="round count, or a comma list like 10,20 to show a selector")
     p.add_argument("--default-rounds", help="default for a --rounds list (default: the first value)")
+    p.add_argument("--routine-id", type=int, help="build the timer from a saved hiit routine (read-only database access)")
+    p.add_argument("--db", help="workout database for --routine-id (default: $WORKOUT_DB, else the server default)")
     p.add_argument("--no-tick", dest="tick", action="store_false", default=None,
                    help="remove the soft once-per-second tick and its toggle (same as \"tick\": false)")
     p.add_argument("--lang", choices=LANGS, help="UI language (default en)")
@@ -251,11 +285,17 @@ def main(argv=None):
             p.error(f"--config is not valid JSON: {e}")
         if not isinstance(config, dict):
             p.error("--config must be a JSON object")
+    if a.routine_id is not None:
+        if a.config or a.duration is not None or a.work is not None or a.rest is not None or a.default_rounds is not None:
+            p.error("--routine-id cannot be combined with --config, --duration, --work, --rest or --default-rounds")
+        config = _routine_config(p, a)
+    elif a.db is not None:
+        p.error("--db is only used with --routine-id")
     if a.duration is not None:
         for key in ("intervals", "segments", "rounds", "warmup_s", "cooldown_s"):
             config.pop(key, None)
         config["duration_s"] = a.duration
-    rounds_mode = any(v is not None for v in (a.work, a.rest, a.rounds, a.default_rounds))
+    rounds_mode = a.routine_id is None and any(v is not None for v in (a.work, a.rest, a.rounds, a.default_rounds))
     if rounds_mode:
         try:
             if a.duration is not None:

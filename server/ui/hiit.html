@@ -25,7 +25,7 @@ const total=()=>plan.reduce((a,x)=>a+x.seconds,0);
 function draw(){const p=countdown?{kind:"ready",round:1}:(plan[pi]||{kind:"done",round:cfg.rounds});document.body.className=p.kind;$('name').textContent=cfg.name+(hiitId!=null?" #"+hiitId:"");
  $('ph').textContent=countdown?"get ready":p.kind;$('ex').textContent=countdown?(plan[0].exercise||""):(p.exercise||(p.kind=="rest"?"Rest":""));
  $('t').textContent=countdown?countdown:(p.kind=="done"?"✓":left);$('r').textContent=p.round;$('rt').textContent=cfg.rounds;
- $('rem').textContent=fmt(Math.max(0,total()-elapsed));const n=countdown?plan[0]:plan[pi+1];$('next').textContent=n&&!countdown?`Next: ${n.exercise||n.kind} ${n.seconds}s`:"";
+ $('rem').textContent=fmt(Math.max(0,total()-elapsed));const n=countdown?plan[0]:plan[pi+1],w=plan[pi+2],up=!countdown&&p.kind=='work'&&n&&n.kind=='rest'&&w&&w.kind=='work'&&w.exercise?w:null;$('next').textContent=up?`Next: ${up.exercise}`:n&&!countdown?`Next: ${n.exercise||n.kind} ${n.seconds}s`:"";
  $('bar').firstChild.style.width=(100*elapsed/total())+"%";$('sk').disabled=$('end').disabled=!started||logged}
 function beep(f=880,d=.12){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=f;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch(e){}}
 function tick(){if(countdown){countdown--;beep(countdown?660:1320,countdown?.1:.25);draw();return}left--;elapsed++;if(left<=3&&left>0)beep();if(left<=0){next();return}draw()}

@@ -13,7 +13,7 @@ command: /usr/bin/python3
 args: [/home/vblife/workout/server/server.py, --stdio]
 ```
 
-`WORKOUT_DB` overrides the database path. `USDA_FDC_API_KEY` optionally enables USDA FoodData Central lookups. Obtain a free key at https://fdc.nal.usda.gov/api-key-signup/. The key stays in the environment and is never returned or stored in SQLite. Without it—or when USDA is unavailable—Workout Bot continues with a clearly labelled model-only estimate.
+`WORKOUT_DB` overrides the database path. Schema migrations run automatically when the server opens the database; see `docs/database.md`. `USDA_FDC_API_KEY` optionally enables USDA FoodData Central lookups. Obtain a free key at https://fdc.nal.usda.gov/api-key-signup/. The key stays in the environment and is never returned or stored in SQLite. Without it—or when USDA is unavailable—Workout Bot continues with a clearly labelled model-only estimate.
 
 ## Product behavior
 

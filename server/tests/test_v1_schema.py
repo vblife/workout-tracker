@@ -19,7 +19,7 @@ class SchemaV1Test(unittest.TestCase):
     def test_clean_database_has_v1_domain_schema(self):
         c = dbm.connect(self.path)
         self.addCleanup(c.close)
-        self.assertEqual(c.execute("SELECT version FROM schema_version").fetchone()[0], 2)
+        self.assertEqual(c.execute("SELECT version FROM schema_version").fetchone()[0], 3)
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self.assertTrue({
             "workout_routines", "workout_routine_items", "workout_session_items",
@@ -43,7 +43,7 @@ class SchemaV1Test(unittest.TestCase):
         row = c.execute("SELECT status, start_mode, last_activity_at FROM sessions").fetchone()
         self.assertEqual((row["status"], row["start_mode"]), ("completed", "implicit"))
         self.assertEqual(row["last_activity_at"], "2026-10-01T09:00:00Z")
-        self.assertEqual(c.execute("SELECT version FROM schema_version").fetchone()[0], 2)
+        self.assertEqual(c.execute("SELECT version FROM schema_version").fetchone()[0], 3)
         c.close()
 
     def test_database_enforces_only_one_active_workout(self):
