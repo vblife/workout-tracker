@@ -312,6 +312,13 @@ class TimerThemeTest(unittest.TestCase):
         for state in STATES:
             self.assertGreaterEqual(contrast(p["bar-track"], p[f"bg-{state}"]), 3.0, state)
         self.assertGreaterEqual(contrast(p["bar-fill"], p["bar-track"]), 3.0)
+        # Checkbox toggles (Keep screen on, Tick): label uses --fg (checked above); the checked box uses
+        # --accent, which must be visible on every background (non-text, 3:1).
+        css = template()[template().index("<style>"):template().index("</style>")]
+        self.assertIn(".toggle{color:var(--fg)", css)
+        self.assertIn(".toggle input{width:24px;height:24px;accent-color:var(--accent)}", css)
+        for state in STATES:
+            self.assertGreaterEqual(contrast(p["accent"], p[f"bg-{state}"]), 3.0, state)
 
 
 class TimerSoundTest(unittest.TestCase):
@@ -362,6 +369,113 @@ class TimerSoundTest(unittest.TestCase):
             (1, "short", "main", "begin"), (2, "long", "main", "begin"), (3, "long", "main", "finish")])
 
 
+def _node_eval(begin, end, expr):
+    node = shutil.which("node")
+    if not node:
+        raise unittest.SkipTest("node not installed")
+    html = template()
+    code = html[html.index(begin):html.index(end)]
+    out = subprocess.run([node, "-e", code + "\nprocess.stdout.write(JSON.stringify(" + expr + "));"],
+                         check=True, capture_output=True, text=True).stdout
+    return json.loads(out)
+
+
+def _timeline(segs):
+    t = 0
+    for s in segs:
+        s["start"], t = t, t + s["seconds"]
+        s["end"] = t
+    return segs
+
+
+class TimerTickTest(unittest.TestCase):
+    CUES = ("/* cue-schedule:begin", "/* cue-schedule:end */")
+
+    def ticks_and_cues(self, segs):
+        segs = json.dumps(_timeline(segs))
+        return _node_eval(*self.CUES, "(function(s){var c=buildCues(s);return {ticks:buildTicks(s,c),cues:c.map(function(x){return x.t})}})(" + segs + ")")
+
+    def test_one_tick_per_second_skipping_cue_seconds_and_ready(self):
+        got = self.ticks_and_cues([{"kind": "ready", "ready": True, "seconds": 5}, {"kind": "work", "seconds": 40},
+                                   {"kind": "rest", "seconds": 20}, {"kind": "work", "seconds": 40}])
+        cues = set(got["cues"])
+        expected = [t for t in range(6, 105) if t not in cues]
+        self.assertEqual(got["ticks"], expected)
+        self.assertEqual(len(got["ticks"]), 37 + 17 + 37)  # 39/19 whole seconds inside each interval, minus 2 shorts
+        self.assertTrue(all(t >= 5 for t in got["ticks"]))  # none during get ready
+        self.assertTrue(all(abs(t - c) >= 0.5 for t in got["ticks"] for c in got["cues"]))
+        self.assertEqual([b - a for a, b in zip(got["ticks"], got["ticks"][1:]) if b - a != 1], [4, 4])  # gaps only at cues
+
+    def test_ticks_for_single_countdown_and_round_options(self):
+        got = self.ticks_and_cues([{"kind": "interval", "seconds": 10}])
+        self.assertEqual(got["ticks"], [1, 2, 3, 4, 5, 6, 7])  # 0 is the begin beep; 8, 9, 10 are the finish cue
+        for n, count in ((10, 10 * 37 + 9 * 17), (20, 20 * 37 + 19 * 17)):
+            cfg = r.normalize_config({"segments": [{"kind": "work", "seconds": 40}, {"kind": "rest", "seconds": 20}],
+                                      "warmup_s": 0, "cooldown_s": 0, "round_options": [10, 20], "rounds": n})
+            got = self.ticks_and_cues([{"kind": "ready", "ready": True, "seconds": 5}] + cfg["intervals"])
+            self.assertEqual(len(got["ticks"]), count)
+
+    def test_ticks_wired_to_schedule_toggle_and_config(self):
+        html = template()
+        self.assertIn('TICK=SOUND&&bool(cfg.tick,true)', html)
+        self.assertIn("ticks=TICK?buildTicks(segs,cues):[]", html)  # tick:false -> no ticks at all
+        self.assertIn("if(tickOn)for(i=0;i<ticks.length;i++)", html)  # pre-scheduled in topUp with the cues
+        self.assertIn('$("tickBox").hidden=!TICK', html)  # toggle removed when tick is false or sound is off
+        self.assertIn("tickOn=tb.checked;if(running)reschedule()", html)
+        self.assertIn('<input type="checkbox" id="tickOn" checked>', html)  # default on
+        self.assertIn(".toggle[hidden]{display:none}", html)
+        self.assertEqual((ui_tables()["en"]["tick"], ui_tables()["zh"]["tick"]), ("Tick", "滴答声"))
+        self.assertIn('tick:"tick"', html)  # ?tick=0 / #tick=off
+
+    def test_tick_sound_is_short_soft_and_quieter_than_cues(self):
+        html = template()
+        gain = float(re.search(r"var TICK_GAIN=([\d.]+)", html).group(1))
+        cue_gains = [float(x) for x in re.findall(r"[\d.]+", re.search(r"GAIN=\{short:([\d.]+),long:([\d.]+)\}", html).group(0))]
+        self.assertLessEqual(gain, min(cue_gains) / 4)
+        begin = html.index("function tickBuffer(")
+        code = html[begin:html.index("\n", html.index("return d}", begin))]
+        data = _node_eval_code(code, "Array.from(tickBuffer(48000))")
+        self.assertEqual(len(data), 960)  # 20 ms
+        self.assertAlmostEqual(max(abs(x) for x in data), 1.0, places=5)
+        self.assertLess(max(abs(x) for x in data[480:]), 0.05)  # 2.5 ms decay constant: under 5% after 10 ms
+        self.assertEqual(data[-1], 0)
+
+    def test_keep_alive_audio_is_truly_silent(self):
+        data = _node_eval("/* keep-alive:begin", "/* keep-alive:end */", "Array.from(new Uint8Array(silentWav(8000,10)))")
+        header, samples = bytes(data[:44]), data[44:]
+        self.assertEqual(header[:4] + header[8:16], b"RIFFWAVEfmt ")
+        self.assertEqual(len(samples), 80000)
+        self.assertEqual(set(samples), {128})  # 8-bit unsigned midpoint = zero amplitude, no click train
+        html = template()
+        self.assertEqual(html.count("createOscillator"), 1)  # only the cue tone(); no hidden hum oscillator
+        self.assertIn("createBuffer(1,1,22050)", html)  # the unlock buffer is one zero sample
+        self.assertNotIn("%400", html)
+        self.assertEqual(html.count('<video id="nosleep" muted'), 1)
+
+    def test_cli_no_tick(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "t.html")
+            script = os.path.join(os.path.dirname(r.__file__), "render_timer_html.py")
+            subprocess.run([sys.executable, script, out, "--duration", "60", "--no-tick"], check=True, capture_output=True)
+            with open(out, encoding="utf-8") as f:
+                self.assertIs(json.loads(injected(f.read()))["tick"], False)
+            subprocess.run([sys.executable, script, out, "--duration", "60"], check=True, capture_output=True)
+            with open(out, encoding="utf-8") as f:
+                self.assertNotIn("tick", json.loads(injected(f.read())))
+        self.assertIs(r.normalize_config({"duration_s": 60, "tick": False})["tick"], False)
+        with self.assertRaises(ValueError):
+            r.normalize_config({"duration_s": 60, "tick": "off"})
+
+
+def _node_eval_code(code, expr):
+    node = shutil.which("node")
+    if not node:
+        raise unittest.SkipTest("node not installed")
+    out = subprocess.run([node, "-e", code + "\nprocess.stdout.write(JSON.stringify(" + expr + "));"],
+                         check=True, capture_output=True, text=True).stdout
+    return json.loads(out)
+
+
 class TimerRoundSelectorTest(unittest.TestCase):
     SCRIPT = os.path.join(os.path.dirname(r.__file__), "render_timer_html.py")
     HIIT = {"label": "HIIT 40/20", "segments": [{"kind": "work", "seconds": 40}, {"kind": "rest", "seconds": 20}],
@@ -405,7 +519,7 @@ class TimerRoundSelectorTest(unittest.TestCase):
         html = template()
         self.assertIn('<div id="rsel" role="group" aria-labelledby="rselLbl" hidden>', html)
         self.assertIn("function rebuild(){", html)
-        self.assertIn("cues=buildCues(segs)}", html)  # cues are rebuilt for the chosen count
+        self.assertIn("cues=buildCues(segs);ticks=", html)  # cues are rebuilt for the chosen count
         self.assertIn("function pickRounds(n){if(started||", html)  # locked after Start
         self.assertIn("box.hidden=started", html)  # hidden while running, back after Reset
         self.assertIn('rounds:"rounds"', html)  # #rounds=20 / ?rounds=20 preselect

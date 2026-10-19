@@ -27,7 +27,8 @@ Config keys (all optional):
   round_options  e.g. [10, 20]: with segments, shows a round-count selector on the
                idle screen; rounds is the default and must be one of the options
   lang         UI language: "en" (default) or "zh"; spoken cues follow it
-  sound, speech, vibrate, keep_awake   booleans (defaults true, false, true, true)
+  sound, speech, vibrate, keep_awake, tick   booleans (defaults true, false, true, true, true);
+               tick false removes the soft once-per-second tick and its on-page toggle
 """
 import argparse
 import json
@@ -44,7 +45,7 @@ KINDS = ("work", "rest", "warmup", "cooldown", "interval")
 LANGS = ("en", "zh")  # must match the STRINGS tables in ui/timer.html
 REMOVED_KEYS = ("strings",)  # per-label overrides were removed; fail loudly instead of ignoring them
 CJK = re.compile(r"[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
-FLAGS = ("sound", "speech", "vibrate", "keep_awake")
+FLAGS = ("sound", "speech", "vibrate", "keep_awake", "tick")
 MAX_SECONDS = 86400
 MAX_INTERVALS = 2000
 MAX_ROUNDS = 100
@@ -233,6 +234,8 @@ def main(argv=None):
     p.add_argument("--rest", help="rest seconds between rounds (the final rest is skipped)")
     p.add_argument("--rounds", help="round count, or a comma list like 10,20 to show a selector")
     p.add_argument("--default-rounds", help="default for a --rounds list (default: the first value)")
+    p.add_argument("--no-tick", dest="tick", action="store_false", default=None,
+                   help="remove the soft once-per-second tick and its toggle (same as \"tick\": false)")
     p.add_argument("--lang", choices=LANGS, help="UI language (default en)")
     p.add_argument("--template", default=os.environ.get("WORKOUT_TIMER_TEMPLATE", DEFAULT_TEMPLATE))
     a = p.parse_args(argv)
@@ -288,6 +291,8 @@ def main(argv=None):
         config["ready_s"] = a.ready
     if a.lang is not None:
         config["lang"] = a.lang
+    if a.tick is False:
+        config["tick"] = False
     with open(a.template, encoding="utf-8") as f:
         template = f.read()
     try:
