@@ -1,6 +1,6 @@
 ---
 name: vblife-workout-hiit-session
-description: Use when the user wants a HIIT or interval timer, asks to review or change HIIT preferences, or reports completing or stopping a timer session.
+description: Use when the user wants a HIIT, interval, or any countdown timer (rest, plank, warm-up), asks to review or change HIIT preferences, or reports completing or stopping a timer session.
 ---
 # HIIT sessions
 
@@ -12,11 +12,22 @@ After exercises and timing are confirmed, call `hiit_timer` with ordered work/re
 
 ## Fallback: HTML timer when MCP Apps is not supported
 
-If the client cannot render the interactive timer (for example a chat without MCP Apps, or the user says they don't see a timer), do not just guide intervals in prose. Immediately generate a self-contained HTML timer file and send it as an attachment, without waiting to be asked:
+If the client cannot render the interactive timer (for example a chat without MCP Apps, Grok Bot on mobile, or the user says they don't see a timer), do not just guide intervals in prose. Immediately generate the HTML timer from the repo template and send it as an attachment, without waiting to be asked:
 
-1. Write one HTML file (e.g. `/workspace/hiit-timer.html`) with inline CSS and JS only, no external assets, using the exact same segments returned by `hiit_timer`: warm-up, each work segment labeled with its exercise name and index (e.g. `Work 3/20`), rest segments showing the next exercise, and the cooldown.
-2. Requirements: big countdown readable on a phone; current phase and exercise name; an "up next" line; distinct background colors for warm-up, work, rest, and cooldown; Start/Pause and Skip buttons; short Web Audio beeps on the last 3 seconds and at each transition; a finished screen at the end. Use the user's language for labels.
-3. Send the file as an attachment, then one short message: open it in a browser, press Start, and tell me when you finish or where you stopped so I can log it.
+1. Write the exact structured `hiit_timer` result (including `hiit_id`, `rounds`, `segments`, `warmup_s`, `cooldown_s`, and `name`) to a JSON file, then run `python server/render_timer_html.py /workspace/hiit-timer.html --config <hiit.json>` from the workout-tracker repo root (two levels above this skill folder). The template expands the segments exactly like the interactive timer: warm-up, each work segment with its exercise name and round, rests, and the cooldown, with the final rest of the last round skipped.
+2. Never hand-write a custom timer page. The template already provides the big countdown, phase and "up next" lines, colors per phase, Start/Pause/Reset/Skip, a 5-second get-ready countdown, beeps for the last 3 seconds of every interval, distinct go and finish sounds, vibration where supported, and the screen-off safeguards documented in `docs/timer.md`.
+3. Send the file as a `file://` attachment, then one short message: open it in the phone's browser, press Start, keep the screen on for the most reliable cues, and tell me when you finish or where you stopped so I can log it.
+
+## Countdown timers (any timer request)
+
+Every countdown timer the bot sends, HIIT or not (rest timer, plank hold, warm-up, stretching, "2-minute timer"), must come from the same template. Never write a timer page by hand.
+
+- Single countdown: `python server/render_timer_html.py /workspace/timer-<slug>.html --duration <seconds or m:ss> --label "<label>"`.
+- Work/rest sequence without a `hiit_timer` call: write `{"label": ..., "intervals": [{"kind": "work", "seconds": 40, "label": "Squats"}, {"kind": "rest", "seconds": 20}]}` to a JSON file and pass it with `--config`. Valid kinds are `work`, `rest`, `warmup`, `cooldown`, and `interval`.
+- Optional: `--ready <seconds>` changes the 5-second get-ready period; `"speech": true` adds spoken countdown numbers.
+- UI labels are English by default (Start, Pause, Reset). Keep the default unless the user asks for another language; then pass `--lang zh` or a `strings` override in the config. The timer label itself can be any text the user wants.
+- Keep the file local and send it as a `file://` attachment. Never upload it to Google Drive or any other external host; it must work offline with no network requests.
+- Be honest about screen-off behavior (details in `docs/timer.md`): time stays correct after the phone wakes, and beeps are pre-scheduled so they usually keep playing while locked on Android Chrome, but iOS may pause audio when locked, in-app viewers are less reliable than the real browser, and iPhones do not vibrate from web pages.
 
 ## Logging
 

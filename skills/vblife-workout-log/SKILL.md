@@ -16,3 +16,5 @@ Log completed work promptly; never log proposed work or something the user says 
 - Use `get_active_workout`, `finish_workout`, or `abandon_workout` when requested. Do not silently replace an active workout.
 
 If the user reports sharp pain or injury, stop the movement, refuse to fabricate or encourage another set, and suggest qualified professional care without diagnosing. Setup is optional; missing preferences never block a log.
+
+If the user wants a countdown or rest timer, generate it from the shared timer template (`server/render_timer_html.py`) as described in `vblife-workout-hiit-session`; never hand-write a timer page.
