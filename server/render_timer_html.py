@@ -5,13 +5,15 @@ meant to be sent as a file:// attachment. Config is injected exactly like
 render_report_html.py: <script>window.openai={toolOutput:<config JSON>};</script>
 before the template's first <script> tag.
 
-The UI text (Start, Pause, Reset, ...) is always English; there is no locale option.
-The caller's label is shown exactly as given, so bots must pass an English label.
-The CLI prints a warning on stderr when a label contains CJK characters.
+The UI text (Start, Pause, Reset, ...) is English by default; lang "zh" switches it to
+Chinese. Unknown lang values are rejected. The caller's label is shown exactly as given,
+so it must be in the same language as the UI. With lang "en" the CLI prints a warning
+on stderr when a label contains CJK characters.
 
 Usage:
   python server/render_timer_html.py out.html --duration 2:00 --label "Warm-up"
   python server/render_timer_html.py out.html --config hiit.json      # hiit_timer result
+  python server/render_timer_html.py out.html --duration 2:00 --label "..." --lang zh
 
 Config keys (all optional):
   label        title shown on the page (hiit_timer "name" is accepted too)
@@ -21,6 +23,7 @@ Config keys (all optional):
   rounds, segments, warmup_s, cooldown_s, hiit_id
                the structured hiit_timer result; expanded into intervals the same
                way hiit.html does (the final rest of the last round is skipped)
+  lang         UI language: "en" (default) or "zh"; spoken cues follow it
   sound, speech, vibrate, keep_awake   booleans (defaults true, false, true, true)
 """
 import argparse
@@ -33,9 +36,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from render_report_html import render as _inject  # noqa: E402
 
 DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "timer.html")
-DEFAULTS = {"label": "Timer", "duration_s": 60, "ready_s": 5}
+DEFAULTS = {"label": "Timer", "duration_s": 60, "ready_s": 5, "lang": "en"}
 KINDS = ("work", "rest", "warmup", "cooldown", "interval")
-REMOVED_KEYS = ("lang", "strings")  # the UI is English-only; fail loudly instead of ignoring them
+LANGS = ("en", "zh")  # must match the STRINGS tables in ui/timer.html
+REMOVED_KEYS = ("strings",)  # per-label overrides were removed; fail loudly instead of ignoring them
 CJK = re.compile(r"[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
 FLAGS = ("sound", "speech", "vibrate", "keep_awake")
 MAX_SECONDS = 86400
@@ -108,10 +112,13 @@ def normalize_config(config):
     out = {
         "label": _label(config.get("label") or config.get("name") or DEFAULTS["label"]),
         "ready_s": parse_seconds(config.get("ready_s", DEFAULTS["ready_s"]), "ready_s", minimum=0, maximum=60),
+        "lang": config.get("lang", DEFAULTS["lang"]),
     }
+    if out["lang"] not in LANGS:
+        raise ValueError(f"lang must be one of: {', '.join(LANGS)} (got {out['lang']!r})")
     for key in REMOVED_KEYS:
         if key in config:
-            raise ValueError(f"'{key}' is not supported: the timer UI is always English")
+            raise ValueError(f"'{key}' is not supported: pick the UI language with lang ({', '.join(LANGS)})")
     if config.get("intervals"):
         items = config["intervals"]
         if not isinstance(items, list):
@@ -153,7 +160,7 @@ def normalize_config(config):
     return out
 
 
-def non_english_labels(config):
+def cjk_labels(config):
     """Labels (title and interval labels) in a normalized config that contain CJK characters."""
     labels = [config.get("label")] + [x.get("label") for x in config.get("intervals", [])]
     return [x for x in dict.fromkeys(labels) if x and CJK.search(x)]
@@ -170,6 +177,7 @@ def main(argv=None):
     p.add_argument("--duration", help="single countdown length: seconds or m:ss")
     p.add_argument("--label")
     p.add_argument("--ready", help="get-ready seconds before the first interval (default 5)")
+    p.add_argument("--lang", choices=LANGS, help="UI language (default en)")
     p.add_argument("--template", default=os.environ.get("WORKOUT_TIMER_TEMPLATE", DEFAULT_TEMPLATE))
     a = p.parse_args(argv)
     config = {}
@@ -192,15 +200,18 @@ def main(argv=None):
         config["label"] = a.label
     if a.ready is not None:
         config["ready_s"] = a.ready
+    if a.lang is not None:
+        config["lang"] = a.lang
     with open(a.template, encoding="utf-8") as f:
         template = f.read()
     try:
         normalized = normalize_config(config)
     except ValueError as e:
         p.error(str(e))
-    for label in non_english_labels(normalized):
-        print(f"warning: timer label is not English: {label!r}; the timer UI is English-only, pass an English label",
-              file=sys.stderr)
+    if normalized["lang"] == "en":
+        for label in cjk_labels(normalized):
+            print(f"warning: timer label is not English: {label!r}; the UI is English (lang en), "
+                  "pass an English label or --lang zh", file=sys.stderr)
     html = _inject(normalized, template)
     with open(a.out_html, "w", encoding="utf-8") as f:
         f.write(html)

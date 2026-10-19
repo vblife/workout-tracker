@@ -12,11 +12,24 @@ import core
 import render_timer_html as r
 
 PREFIX = "<script>window.openai={toolOutput:"
+CJK = re.compile(r"[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
+# The same ranges written as JS/JSON \\uXXXX escapes, any hex case.
+ESCAPED_CJK = re.compile(r"(?i)\\u(?:2e|2f|3[0-9a-f]|[4-9][0-9a-f]|a[c-f]|[bc][0-9a-f]|d[0-7]|f9|fa|ff)[0-9a-f]{2}")
 
 
 def template():
     with open(r.DEFAULT_TEMPLATE, encoding="utf-8") as f:
         return f.read()
+
+
+def ui_tables():
+    """Parse the STRINGS tables of the template into {lang: {key: text}}."""
+    html = template()
+    body = html[html.index("var STRINGS={"):html.index("\n};", html.index("var STRINGS={"))]
+    tables = {}
+    for lang, inner in re.findall(r"\n (\w+):\{(.*?)\}(?=,\n \w+:\{|$)", body + "\n", re.S):
+        tables[lang] = {k: json.loads('"' + v + '"') for k, v in re.findall(r'(\w+):"((?:[^"\\]|\\.)*)"', inner)}
+    return tables
 
 
 def injected(html):
@@ -49,20 +62,36 @@ class TimerTemplateTest(unittest.TestCase):
         html = template()
         self.assertIn('<button id="start" type="button">Start</button>', html)
         self.assertIn('<button id="reset" type="button">Reset</button>', html)
-        self.assertIn('start:"Start",pause:"Pause",resume:"Resume",reset:"Reset"', html)
-        self.assertNotIn("lang", r.normalize_config({}))
+        self.assertIn('lang:"en"', html)
+        self.assertEqual(r.normalize_config({})["lang"], "en")
+        en = ui_tables()["en"]
+        self.assertEqual((en["start"], en["pause"], en["resume"], en["reset"]), ("Start", "Pause", "Resume", "Reset"))
+        # Any language other than a known table falls back to English at runtime (hash/query params).
+        self.assertIn('var LANG=Object.prototype.hasOwnProperty.call(STRINGS,cfg.lang)?cfg.lang:"en",L=STRINGS[LANG];', html)
 
-    def test_ui_is_english_only(self):
+    def test_cjk_only_inside_the_zh_table(self):
         html = template()
-        cjk = re.compile(r"[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
-        self.assertIsNone(cjk.search(html))
-        self.assertNotRegex(html, r"\\u(?:[2-9][e-f]|[4-9a-d][0-9a-f])[0-9a-f]{2}")  # no escaped CJK either
-        for gone in ("STRINGS", "zh:", "zh-CN", "cfg.lang", "cfg.strings", 'lang:"lang"'):
-            self.assertNotIn(gone, html)
-        self.assertIn('<html lang="en">', html)
-        self.assertIn('u.lang="en-US"', html)
-        # A rendered timer with an English label carries no CJK text at all.
-        self.assertIsNone(cjk.search(r.render({"label": "Plank", "duration_s": 60}, html)))
+        zh_start = html.index("\n zh:{")
+        outside = html[:zh_start] + html[html.index("\n};", zh_start):]
+        self.assertIsNone(CJK.search(html))  # the zh table is \\u-escaped ASCII
+        self.assertIsNone(ESCAPED_CJK.search(outside))
+        self.assertIsNotNone(ESCAPED_CJK.search(html[zh_start:]))
+        self.assertIsNone(CJK.search(r.render({"label": "Plank", "duration_s": 60}, html)))
+
+    def test_zh_table_is_complete_chinese(self):
+        tables = ui_tables()
+        self.assertEqual(set(tables), set(r.LANGS))
+        self.assertEqual(set(tables["zh"]), set(tables["en"]))
+        zh = tables["zh"]
+        self.assertEqual((zh["start"], zh["pause"], zh["resume"], zh["reset"], zh["skip"]), ("开始", "暂停", "继续", "重置", "跳过"))
+        self.assertEqual(zh["keepAwake"], "保持屏幕常亮")
+        for key, value in zh.items():
+            if value and key not in ("interval",):
+                self.assertTrue(CJK.search(value), key)
+        html = template()
+        self.assertIn('u.lang=LANG==="zh"?"zh-CN":"en-US"', html)  # speech follows lang
+        self.assertIn("document.documentElement.lang=LANG", html)
+        self.assertIn('lang:"lang"', html)  # ?lang= / #lang= URL params
 
     def test_injects_before_first_script_and_escapes(self):
         html = r.render({"label": "</script><!-- & <b> 练", "duration_s": 30}, template())
@@ -130,41 +159,63 @@ class TimerConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             r.normalize_config({"rounds": 0, "segments": [{"kind": "work", "seconds": 5}]})
 
-    def test_flags_and_removed_locale_options(self):
-        cfg = r.normalize_config({"speech": True, "vibrate": False})
-        self.assertEqual((cfg["speech"], cfg["vibrate"]), (True, False))
-        for bad in ({"speech": "yes"}, {"lang": "zh"}, {"lang": "en"}, {"strings": {"start": "Go"}}):
+    def test_flags_lang_and_removed_strings(self):
+        cfg = r.normalize_config({"speech": True, "vibrate": False, "lang": "zh"})
+        self.assertEqual((cfg["speech"], cfg["vibrate"], cfg["lang"]), (True, False, "zh"))
+        self.assertEqual(json.loads(injected(r.render({"lang": "zh"}, template())))["lang"], "zh")
+        for bad in ({"speech": "yes"}, {"lang": "fr"}, {"lang": "ZH"}, {"lang": ""}, {"lang": None},
+                    {"strings": {"start": "Go"}}):
             with self.assertRaises(ValueError, msg=bad):
                 r.normalize_config(bad)
         with self.assertRaises(ValueError):
             r.normalize_config([1, 2])
-        self.assertFalse(hasattr(r, "LANGS"))
+        self.assertEqual(r.LANGS, ("en", "zh"))
         self.assertFalse(hasattr(r, "STRING_KEYS"))
 
-    def test_label_kept_verbatim_and_non_english_flagged(self):
+    def test_label_kept_verbatim_and_cjk_flagged(self):
         cfg = r.normalize_config({"label": "2 分钟计时", "duration_s": 120})
         self.assertEqual(cfg["label"], "2 分钟计时")
-        self.assertEqual(r.non_english_labels(cfg), ["2 分钟计时"])
+        self.assertEqual(r.cjk_labels(cfg), ["2 分钟计时"])
         cfg = r.normalize_config({"label": "Tabata", "intervals": [{"kind": "work", "seconds": 20, "label": "深蹲"},
                                                                    {"kind": "rest", "seconds": 10}]})
-        self.assertEqual(r.non_english_labels(cfg), ["深蹲"])
-        self.assertEqual(r.non_english_labels(r.normalize_config({"label": "Plank 1:30"})), [])
+        self.assertEqual(r.cjk_labels(cfg), ["深蹲"])
+        self.assertEqual(r.cjk_labels(r.normalize_config({"label": "Plank 1:30"})), [])
+        self.assertFalse(hasattr(r, "non_english_labels"))
 
-    def test_cli_rejects_lang_and_warns_on_non_english_label(self):
+    def test_cli_lang_and_label_warning_per_lang(self):
         script = os.path.join(os.path.dirname(r.__file__), "render_timer_html.py")
+
+        def run(*args):
+            return subprocess.run([sys.executable, script, out, *args], capture_output=True, text=True, encoding="utf-8")
+
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "t.html")
-            res = subprocess.run([sys.executable, script, out, "--duration", "60", "--lang", "zh"], capture_output=True, text=True)
+            for bad in (["--lang", "fr"], ["--lang", "zh-CN"]):
+                res = run("--duration", "60", *bad)
+                self.assertEqual(res.returncode, 2, bad)
+                self.assertIn("invalid choice", res.stderr)
+                self.assertFalse(os.path.exists(out))
+            cfg_path = os.path.join(tmp, "fr.json")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump({"lang": "fr"}, f)
+            res = run("--config", cfg_path)
             self.assertEqual(res.returncode, 2)
-            self.assertFalse(os.path.exists(out))
-            res = subprocess.run([sys.executable, script, out, "--duration", "2:00", "--label", "2 分钟计时"],
-                                 capture_output=True, text=True, encoding="utf-8")
+            self.assertIn("lang must be one of: en, zh", res.stderr)
+            self.assertNotIn("Traceback", res.stderr)
+            # lang en (default) + CJK label: warn, still write the file, keep the label verbatim.
+            res = run("--duration", "2:00", "--label", "2 分钟计时")
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertIn("warning: timer label is not English", res.stderr)
             with open(out, encoding="utf-8") as f:
-                self.assertEqual(json.loads(injected(f.read()))["label"], "2 分钟计时")
-            res = subprocess.run([sys.executable, script, out, "--duration", "2:00", "--label", "2-minute timer"],
-                                 capture_output=True, text=True)
+                data = json.loads(injected(f.read()))
+            self.assertEqual((data["label"], data["lang"]), ("2 分钟计时", "en"))
+            # lang zh + Chinese label: no warning, Chinese UI requested.
+            res = run("--duration", "2:00", "--label", "2 分钟计时", "--lang", "zh")
+            self.assertEqual((res.returncode, res.stderr), (0, ""))
+            with open(out, encoding="utf-8") as f:
+                data = json.loads(injected(f.read()))
+            self.assertEqual((data["label"], data["lang"]), ("2 分钟计时", "zh"))
+            res = run("--duration", "2:00", "--label", "2-minute timer")
             self.assertEqual((res.returncode, res.stderr), (0, ""))
 
     def test_cli_writes_file(self):
