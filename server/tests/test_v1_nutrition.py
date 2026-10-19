@@ -89,6 +89,55 @@ class NutritionTest(unittest.TestCase):
         self.assertIn("height_cm", result["missing_for_energy"])
         self.assertEqual(result["assumptions"], {"age": 35, "weight_kg": 80})
 
+    FULL = {"age": 40, "weight_kg": 90, "height_cm": 178, "sex": "male", "activity_level": "light", "objective": "fat_loss"}
+
+    def test_invalid_enum_errors_list_accepted_values(self):
+        cases = [("objective", "bulk", "maintenance, fat_loss, muscle_gain"),
+                 ("activity_level", "high", "sedentary, light, moderate, active, very_active"),
+                 ("sex", "other", "male, female")]
+        for key, value, accepted in cases:
+            with self.assertRaises(core.UserError) as raised:
+                nutrition.recommend_goals({**self.FULL, key: value})
+            self.assertIn(accepted, str(raised.exception))
+            self.assertIn(repr(value), str(raised.exception))
+        with self.assertRaises(core.UserError):
+            nutrition.recommend_goals({**self.FULL, "height_cm": 0})
+
+    def test_low_risk_aliases_normalize_to_canonical_inputs(self):
+        canonical = nutrition.recommend_goals(self.FULL)
+        for alias in ("lose", "weight_loss"):
+            result = nutrition.recommend_goals({**self.FULL, "objective": alias})
+            self.assertEqual(result["recommendations"], canonical["recommendations"])
+            self.assertEqual(result["assumptions"]["objective"], "fat_loss")
+        self.assertEqual(nutrition.recommend_goals({**self.FULL, "objective": "maintain"})["assumptions"]["objective"], "maintenance")
+        aged = {k: v for k, v in self.FULL.items() if k != "age"}
+        result = nutrition.recommend_goals({**aged, "age_years": 40})
+        self.assertEqual(result["recommendations"], canonical["recommendations"])
+        self.assertEqual(result["assumptions"]["age"], 40)
+        self.assertNotIn("ignored_inputs", result)
+        with self.assertRaises(core.UserError):
+            nutrition.recommend_goals({**self.FULL, "age_years": 41})
+        with self.assertRaises(core.UserError):  # alias still goes through the adult guardrail
+            nutrition.recommend_goals({**aged, "age_years": 16})
+        with self.assertRaises(core.UserError):  # ambiguous words are not guessed
+            nutrition.recommend_goals({**self.FULL, "objective": "gain"})
+
+    def test_unused_inputs_are_reported_not_silently_dropped(self):
+        result = nutrition.recommend_goals({**self.FULL, "goal_weight_kg": 80, "target_date": "2027-03-01"})
+        self.assertEqual(result["ignored_inputs"], ["goal_weight_kg", "target_date"])
+        self.assertNotIn("goal_weight_kg", result["assumptions"])
+        for flag in nutrition.GUARDRAIL_FLAGS:
+            with self.assertRaises(core.UserError):
+                nutrition.recommend_goals({**self.FULL, flag: True})
+
+    def test_recommendation_keys_map_to_goal_metrics(self):
+        import goals
+        rec = nutrition.recommend_goals(self.FULL)["recommendations"]
+        self.assertEqual(set(rec), {"calories_kcal", "protein_g", "protein_g_range", "fiber_g", "saturated_fat_g_max", "sodium_mg_max"})
+        for key in rec:
+            metric = key.replace("_range", "").replace("_max", "")
+            self.assertIn(metric, goals.NUTRITION_METRICS, key)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

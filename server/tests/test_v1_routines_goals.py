@@ -68,6 +68,37 @@ class RoutinesGoalsTest(unittest.TestCase):
                                         semantics="minimum", target_value=1, unit="sessions", effective_start_date="2026-09-01")
             self.assertEqual(goals.goal_progress(self.c, created["goal_id"], anchor_date="2026-10-05")["period"], period)
 
+    def test_create_goal_errors_name_accepted_values(self):
+        with self.assertRaises(core.UserError) as raised:
+            goals.create_goal(self.c, domain="nutrition", period="day", metric="saturated_fat", semantics="maximum",
+                              target_value=13, unit="g", effective_start_date="2026-10-01")
+        self.assertIn("saturated_fat_g", str(raised.exception))
+        self.assertIn("sodium_mg", str(raised.exception))
+        with self.assertRaises(core.UserError):
+            goals.create_goal(self.c, domain="nutrition", period="day", metric="fiber_g", semantics="minimum",
+                              target_value=30, unit="g", effective_start_date="10/01/2026")
+        self.assertEqual(goals.list_goals(self.c)["goals"], [])
+
+    def test_onboarding_goal_set_with_origin_and_assumptions(self):
+        common = dict(domain="nutrition", period="day", effective_start_date="2026-10-19",
+                      recommendation_version="mifflin-dga-v1")
+        made = [
+            goals.create_goal(self.c, metric="calories_kcal", semantics="range", lower_value=2000, upper_value=2200, unit="kcal",
+                              origin="user", assumptions=["recommended 2100 kcal", "user chose +/-100 kcal range"], **common),
+            goals.create_goal(self.c, metric="protein_g", semantics="range", lower_value=108, upper_value=162, unit="g",
+                              origin="recommended", assumptions=["weight_kg 90"], **common),
+            goals.create_goal(self.c, metric="saturated_fat_g", semantics="maximum", target_value=14, unit="g",
+                              origin="user", assumptions=["user-requested: about 6% of calories"], **common),
+            goals.create_goal(self.c, metric="fiber_g", semantics="minimum", target_value=30, unit="g", origin="user", **common),
+            goals.create_goal(self.c, metric="sodium_mg", semantics="maximum", target_value=2300, unit="mg", origin="recommended", **common),
+            goals.create_goal(self.c, metric="sugar_g", semantics="maximum", target_value=50, unit="g", origin="user", **common),
+        ]
+        listed = goals.list_goals(self.c, domain="nutrition")["goals"]
+        self.assertEqual(len(listed), 6)
+        self.assertEqual(made[0]["assumptions"], ["recommended 2100 kcal", "user chose +/-100 kcal range"])
+        self.assertEqual(made[1]["origin"], "recommended")
+        self.assertEqual(made[1]["recommendation_version"], "mifflin-dga-v1")
+
     def test_user_goal_supersedes_recommendation(self):
         recommended = goals.create_goal(self.c, domain="nutrition", period="day", metric="protein_g",
                                         semantics="minimum", target_value=120, unit="g", origin="recommended",
