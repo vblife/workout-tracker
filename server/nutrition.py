@@ -145,23 +145,51 @@ def search_usda(query, api_key=None, opener=None):
         return {"status": "model_only_fallback", "reason": "USDA lookup unavailable", "matches": []}
 
 
+ACTIVITY_FACTORS = {"sedentary": 1.2, "light": 1.375, "moderate": 1.55, "active": 1.725, "very_active": 1.9}
+OBJECTIVES = ("maintenance", "fat_loss", "muscle_gain")
+SEXES = ("male", "female")
+RECOMMEND_INPUTS = ("age", "weight_kg", "height_cm", "sex", "activity_level", "objective")
+GUARDRAIL_FLAGS = ("pregnant", "breastfeeding", "eating_disorder", "medical_condition")
+# Unambiguous spellings seen from callers; normalized before validation.
+INPUT_ALIASES = {"age_years": "age"}
+OBJECTIVE_ALIASES = {"lose": "fat_loss", "weight_loss": "fat_loss", "maintain": "maintenance"}
+
+
+def _normalize_recommend_inputs(inputs):
+    if not isinstance(inputs, dict):
+        raise _error("inputs must be an object with: " + ", ".join(RECOMMEND_INPUTS))
+    inputs = dict(inputs)
+    for alias, key in INPUT_ALIASES.items():
+        if alias in inputs:
+            value = inputs.pop(alias)
+            if inputs.get(key) is not None and inputs[key] != value:
+                raise _error(f"{alias} and {key} disagree; send only {key}")
+            if inputs.get(key) is None:
+                inputs[key] = value
+    if isinstance(inputs.get("objective"), str):
+        inputs["objective"] = OBJECTIVE_ALIASES.get(inputs["objective"], inputs["objective"])
+    return inputs
+
+
 def recommend_goals(inputs):
-    required = ("age", "weight_kg", "height_cm", "sex", "activity_level", "objective")
+    inputs = _normalize_recommend_inputs(inputs)
+    required = RECOMMEND_INPUTS
     if inputs.get("age") is None:
         raise _error("age is required to confirm that adult recommendations are appropriate")
     if not isinstance(inputs["age"], (int, float)) or not 18 <= inputs["age"] <= 100:
         raise _error("personalized nutrition recommendations are limited to adults")
-    if inputs.get("pregnant") or inputs.get("breastfeeding") or inputs.get("eating_disorder") or inputs.get("medical_condition"):
+    if any(inputs.get(flag) for flag in GUARDRAIL_FLAGS):
         raise _error("this profile needs qualified clinical nutrition guidance")
-    factors = {"sedentary": 1.2, "light": 1.375, "moderate": 1.55, "active": 1.725, "very_active": 1.9}
-    if inputs.get("sex") is not None and inputs["sex"] not in ("male", "female"):
-        raise _error("sex used for calculation must be male or female")
+    factors = ACTIVITY_FACTORS
+    if inputs.get("sex") is not None and inputs["sex"] not in SEXES:
+        raise _error(f"sex used for calculation must be one of: {', '.join(SEXES)} (got {inputs['sex']!r})")
     if inputs.get("activity_level") is not None and inputs["activity_level"] not in factors:
-        raise _error("unsupported activity level")
-    if inputs.get("objective") is not None and inputs["objective"] not in ("maintenance", "fat_loss", "muscle_gain"):
-        raise _error("unsupported objective")
-    if inputs.get("weight_kg") is not None and (not isinstance(inputs["weight_kg"], (int, float)) or inputs["weight_kg"] <= 0):
-        raise _error("weight_kg must be greater than zero")
+        raise _error(f"unsupported activity_level {inputs['activity_level']!r}; use one of: {', '.join(factors)}")
+    if inputs.get("objective") is not None and inputs["objective"] not in OBJECTIVES:
+        raise _error(f"unsupported objective {inputs['objective']!r}; use one of: {', '.join(OBJECTIVES)}")
+    for key in ("weight_kg", "height_cm"):
+        if inputs.get(key) is not None and (isinstance(inputs[key], bool) or not isinstance(inputs[key], (int, float)) or inputs[key] <= 0):
+            raise _error(f"{key} must be a number greater than zero")
     recommendations = {"sodium_mg_max": 2300}
     if inputs.get("weight_kg") is not None:
         recommendations["protein_g_range"] = [round(inputs["weight_kg"] * 1.2), round(inputs["weight_kg"] * 1.8)]
@@ -176,6 +204,8 @@ def recommend_goals(inputs):
         recommendations.update({"calories_kcal": round(calories / 10) * 10, "protein_g": round(protein),
                                 "saturated_fat_g_max": round(calories * 0.1 / 9)})
     assumptions = {key: inputs[key] for key in required if inputs.get(key) is not None}
-    return {"saved": False, "version": "mifflin-dga-v1", "basis": "Mifflin-St Jeor plus Dietary Guidelines guardrails",
+    ignored = sorted(key for key in inputs if key not in RECOMMEND_INPUTS and key not in GUARDRAIL_FLAGS)
+    result_extra = {"ignored_inputs": ignored} if ignored else {}
+    return {**result_extra, "saved": False, "version": "mifflin-dga-v1", "basis": "Mifflin-St Jeor plus Dietary Guidelines guardrails",
             "recommendations": recommendations, "missing_for_energy": missing, "assumptions": assumptions,
             "notice": "Educational estimate for generally healthy adults; confirm before saving."}

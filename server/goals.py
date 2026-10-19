@@ -18,8 +18,9 @@ def create_goal(c, *, domain, period, metric, semantics, unit, effective_start_d
                 lower_value=None, upper_value=None, display_precision=0, origin="user", recommendation_version=None, assumptions=None):
     if domain not in ("workout", "nutrition") or period not in ("day", "week", "month"):
         raise _error("invalid goal domain or period")
-    if metric not in (WORKOUT_METRICS if domain == "workout" else NUTRITION_METRICS):
-        raise _error("invalid metric for goal domain")
+    allowed_metrics = WORKOUT_METRICS if domain == "workout" else NUTRITION_METRICS
+    if metric not in allowed_metrics:
+        raise _error(f"invalid metric {metric!r} for {domain} goals; use one of: {', '.join(sorted(allowed_metrics))}")
     if domain == "nutrition" and period != "day":
         raise _error("V1 nutrition goals must use the day period")
     if semantics not in ("minimum", "maximum", "exact", "range") or origin not in ("user", "recommended"):
@@ -29,6 +30,10 @@ def create_goal(c, *, domain, period, metric, semantics, unit, effective_start_d
             raise _error("range goals need ordered lower_value and upper_value")
     elif target_value is None:
         raise _error("goal target_value is required")
+    try:
+        date.fromisoformat(effective_start_date)
+    except (TypeError, ValueError):
+        raise _error("effective_start_date must be YYYY-MM-DD")
     now = dbm.now()
     with dbm.transaction(c):
         if origin == "user":

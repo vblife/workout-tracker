@@ -48,6 +48,29 @@ class MCPToolsTest(unittest.TestCase):
         for tool in tools:
             self.assertFalse(tool["inputSchema"].get("additionalProperties", True), tool["name"])
 
+    def test_goal_tool_schemas_document_the_real_contract(self):
+        import goals
+        import nutrition
+        tools = {t["name"]: t for t in self.s.handle({"method": "tools/list", "params": {}})["tools"]}
+        inputs = tools["recommend_nutrition_goals"]["inputSchema"]["properties"]["inputs"]
+        props = inputs["properties"]
+        self.assertEqual(props["objective"]["enum"], ["maintenance", "fat_loss", "muscle_gain"])
+        self.assertEqual(props["activity_level"]["enum"], list(nutrition.ACTIVITY_FACTORS))
+        self.assertEqual(props["sex"]["enum"], ["male", "female"])
+        self.assertEqual(inputs["required"], ["age"])
+        for key in nutrition.RECOMMEND_INPUTS + nutrition.GUARDRAIL_FLAGS:
+            self.assertIn(key, props)
+        self.assertNotIn("age_years", props)  # alias accepted, not advertised as a separate input
+        metric = tools["create_goal"]["inputSchema"]["properties"]["metric"]
+        self.assertEqual(set(metric["enum"]), goals.NUTRITION_METRICS | goals.WORKOUT_METRICS)
+        bad = self.call("recommend_nutrition_goals", {"inputs": {"age": 40, "objective": "bulk"}})
+        self.assertTrue(bad["isError"])
+        self.assertIn("maintenance, fat_loss, muscle_gain", bad["content"][0]["text"])
+        ok = self.call("recommend_nutrition_goals", {"inputs": {"age_years": 40, "weight_kg": 90, "height_cm": 178, "sex": "male",
+                                                                 "activity_level": "light", "objective": "lose"}})
+        self.assertFalse(ok.get("isError", False))
+        self.assertIn("calories_kcal", ok["structuredContent"]["recommendations"])
+
     def test_setup_updates_only_explicit_preferences(self):
         first = self.call("update_settings", {"settings": {"unit": "kg", "reminders_enabled": False,
             "hiit_defaults": {"work_duration_s": 40, "rest_duration_s": 20, "rounds": 20, "warmup_s": 10, "cooldown_s": 60}}})
