@@ -20,7 +20,7 @@ main{min-height:100%;display:flex;flex-direction:column;align-items:center;justi
 .btns{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:1vh}
 button{font:inherit;font-size:clamp(20px,6vw,30px);font-weight:650;min-width:38vw;max-width:300px;padding:.55em 1em;border-radius:16px;border:1px solid var(--btn-line);background:var(--btn-bg);color:var(--btn-fg);touch-action:manipulation}
 button#start{background:var(--start-bg);color:var(--start-fg);border-color:var(--start-bg)}button#start.pause{background:var(--pause-bg);color:var(--pause-fg);border-color:var(--pause-bg)}
-button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-color:var(--btn-line)}.toggle{color:var(--fg);font-size:clamp(15px,4.2vw,20px);display:flex;align-items:center;gap:8px;margin-top:1vh}.toggle input{width:24px;height:24px;accent-color:var(--accent)}
+button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-color:var(--btn-line)}.toggle{color:var(--fg);font-size:clamp(15px,4.2vw,20px);display:flex;align-items:center;gap:8px;margin-top:1vh}.toggle input{width:24px;height:24px;accent-color:var(--accent)}.toggle[hidden]{display:none}
 #rsel{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:1vh}#rsel[hidden]{display:none}#rselLbl{color:var(--fg);font-size:clamp(16px,4.6vw,22px);font-weight:600}
 .rbtns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}.rbtns button{min-width:30vw;max-width:220px;background:var(--unsel-bg);color:var(--unsel-fg);border:3px solid var(--btn-line)}.rbtns button[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-fg);border-color:var(--sel-bg)}
 #status,#msg{font-size:clamp(12px,3.6vw,16px);color:var(--muted);min-height:1.2em}
@@ -30,6 +30,7 @@ button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-co
 <div id="rsel" role="group" aria-labelledby="rselLbl" hidden><div id="rselLbl">Rounds</div><div class="rbtns" id="rbtns"></div></div>
 <div class="btns"><button id="start" type="button">Start</button><button id="reset" type="button">Reset</button><button id="skip" type="button" hidden>Skip</button></div>
 <label class="toggle"><input type="checkbox" id="awake" checked><span id="awakeLbl">Keep screen on</span></label>
+<label class="toggle" id="tickBox"><input type="checkbox" id="tickOn" checked><span id="tickLbl">Tick</span></label>
 <div id="status"></div><div id="msg"></div></main>
 <video id="nosleep" muted playsinline loop preload="auto" aria-hidden="true"><source type="video/webm" src="data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAHGEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHGTbuMU6uEElTDZ1OsggETTbuMU6uEHFO7a1OsggGw7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmoCrXsYMPQkBNgIRMYXZmV0GETGF2ZkSJiECfQAAAAAAAFlSua8iuAQAAAAAAAD/XgQFzxYgAAAAAAAAAAZyBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhDuaygDgkLCBELqBEJqBAlWwhFW5gQESVMNn0HNzzWPAi2PFiAAAAAAAAAABZ8iYRaOHRU5DT0RFUkSHi0xhdmMgbGlidnB4Z8ihRaOIRFVSQVRJT05Eh5MwMDowMDowMi4wMDAwMDAwMDAAH0O2dcPngQCjo4EAAIAQAgCdASoQABAAAEcIhYWImYSIAgIADA1gAP7/q1CAo5mBA+gAsQEAARAQABgAMD/0DAAAAP7/q1CAHFO7a5G7j7OBALeK94EB8YIBaPCBAw=="><source type="video/mp4" src="data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMHbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlZ0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHObWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABeW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAATlzdGJsAAAAuXN0c2QAAAAAAAAAAQAAAKlhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABDExhdmMgbGlieDI2NAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAAL2F2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMACDxImSABAAZoy4BlLIAAAAAQcGFzcAAAAAEAAAABAAAAFGJ0cnQAAAAAAAAAZAAAAAAAAAAYc3R0cwAAAAAAAAABAAAAAgAAQAAAAAAUc3RzcwAAAAAAAAABAAAAAQAAABxzdHNjAAAAAAAAAAEAAAABAAAAAgAAAAEAAAAcc3RzegAAAAAAAAAAAAAAAgAAAA8AAAAKAAAAFHN0Y28AAAAAAAAAAQAAAzcAAAA9dWR0YQAAADVtZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAAhpbHN0AAAACGZyZWUAAAAhbWRhdAAAAAtliIQFvJigACFPgAAAAAZBmjgK+oA="></video>
 <script>
@@ -40,15 +41,15 @@ button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-co
    URL query string, then the URL hash (base64url JSON or key=value pairs). */
 /* UI text tables. English is the default; "zh" is the only other locale. Unknown values fall back to English. */
 var STRINGS={
- en:{start:"Start",pause:"Pause",resume:"Resume",reset:"Reset",skip:"Skip",ready:"Get ready",work:"Work",rest:"Rest",warmup:"Warm-up",cooldown:"Cool-down",interval:"",done:"Done!",next:"Next",round:"Round {r}/{n}",left:"{t} left",keepAwake:"Keep screen on",go:"Go",
+ en:{start:"Start",pause:"Pause",resume:"Resume",reset:"Reset",skip:"Skip",ready:"Get ready",work:"Work",rest:"Rest",warmup:"Warm-up",cooldown:"Cool-down",interval:"",done:"Done!",next:"Next",round:"Round {r}/{n}",left:"{t} left",keepAwake:"Keep screen on",tick:"Tick",go:"Go",
   wlLock:"Screen stays on (wake lock)",wlVideo:"Screen stays on (video fallback)",wlOff:"Screen may turn off; audio cues are pre-scheduled",wlNone:"Keep-screen-on is not available here; leave the screen on for the most reliable cues",
   audioOff:"Sound is off or blocked; tap Resume to re-enable",total:"Total {t}",tellChat:"Tell the chat you finished HIIT #{id} so it can be logged",badLink:"Bad timer link; using defaults",rounds:"Rounds",roundsN:"{n} rounds"},
- zh:{start:"\u5f00\u59cb",pause:"\u6682\u505c",resume:"\u7ee7\u7eed",reset:"\u91cd\u7f6e",skip:"\u8df3\u8fc7",ready:"\u51c6\u5907",work:"\u8bad\u7ec3",rest:"\u4f11\u606f",warmup:"\u70ed\u8eab",cooldown:"\u653e\u677e",interval:"",done:"\u5b8c\u6210!",next:"\u4e0b\u4e00\u4e2a",round:"\u7b2c {r}/{n} \u8f6e",left:"\u5269\u4f59 {t}",keepAwake:"\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae",go:"\u5f00\u59cb",
+ zh:{start:"\u5f00\u59cb",pause:"\u6682\u505c",resume:"\u7ee7\u7eed",reset:"\u91cd\u7f6e",skip:"\u8df3\u8fc7",ready:"\u51c6\u5907",work:"\u8bad\u7ec3",rest:"\u4f11\u606f",warmup:"\u70ed\u8eab",cooldown:"\u653e\u677e",interval:"",done:"\u5b8c\u6210!",next:"\u4e0b\u4e00\u4e2a",round:"\u7b2c {r}/{n} \u8f6e",left:"\u5269\u4f59 {t}",keepAwake:"\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae",tick:"\u6ef4\u7b54\u58f0",go:"\u5f00\u59cb",
   wlLock:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (wake lock)",wlVideo:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (video)",wlOff:"\u5c4f\u5e55\u53ef\u80fd\u5173\u95ed\uff1b\u63d0\u793a\u97f3\u5df2\u9884\u5148\u5b89\u6392",wlNone:"\u6b64\u5904\u65e0\u6cd5\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae\uff0c\u8bf7\u5c3d\u91cf\u4e0d\u8981\u9501\u5c4f",
   audioOff:"\u58f0\u97f3\u88ab\u5173\u95ed\u6216\u963b\u6b62\uff0c\u8bf7\u70b9\u201c\u7ee7\u7eed\u201d\u91cd\u65b0\u542f\u7528",total:"\u603b\u8ba1 {t}",tellChat:"\u8bf7\u5728\u804a\u5929\u4e2d\u544a\u8bc9\u6211\u5df2\u5b8c\u6210 HIIT #{id}\uff0c\u4ee5\u4fbf\u8bb0\u5f55",badLink:"\u94fe\u63a5\u65e0\u6548\uff0c\u4f7f\u7528\u9ed8\u8ba4\u8bbe\u7f6e",rounds:"\u7ec4\u6570",roundsN:"{n} \u7ec4"}
 };
 var KINDS={work:1,rest:1,warmup:1,cooldown:1,interval:1};
-var DEF={label:"Timer",duration_s:60,ready_s:5,lang:"en",sound:true,speech:false,vibrate:true,keep_awake:true};
+var DEF={label:"Timer",duration_s:60,ready_s:5,lang:"en",sound:true,speech:false,vibrate:true,keep_awake:true,tick:true};
 var HORIZON=1200,MAX_INTERVALS=2000,MAX_TOTAL=86400;
 var $=function(i){return document.getElementById(i)};
 function fmt(s){s=Math.max(0,Math.ceil(s-1e-6));var h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return(h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0")}
@@ -57,7 +58,7 @@ function bool(v,d){if(v===undefined||v===null||v==="")return d;if(typeof v==="bo
 function text(v){return v===undefined||v===null?"":String(v).slice(0,200)}
 var cfg={},msgs=[];
 function merge(src){if(!src||typeof src!=="object")return;for(var k in src)if(Object.prototype.hasOwnProperty.call(src,k))cfg[k]=src[k]}
-function fromParams(ps){var o={},map={label:"label",duration:"duration_s",duration_s:"duration_s",ready:"ready_s",ready_s:"ready_s",lang:"lang",rounds:"rounds",sound:"sound",speech:"speech",vibrate:"vibrate",keep_awake:"keep_awake"};
+function fromParams(ps){var o={},map={label:"label",duration:"duration_s",duration_s:"duration_s",ready:"ready_s",ready_s:"ready_s",lang:"lang",rounds:"rounds",sound:"sound",speech:"speech",vibrate:"vibrate",keep_awake:"keep_awake",tick:"tick"};
  ps.forEach(function(v,k){if(map[k])o[map[k]]=v});if(o.duration_s!==undefined){o.duration_s=sec(o.duration_s);delete cfg.intervals;delete cfg.rounds;delete cfg.segments}if(o.ready_s!==undefined)o.ready_s=sec(o.ready_s);if(o.rounds!==undefined)o.rounds=parseInt(o.rounds,10)||0;return o}
 function loadConfig(){merge(DEF);
  try{if(window.openai&&window.openai.toolOutput)merge(window.openai.toolOutput)}catch(e){}
@@ -84,12 +85,12 @@ var selRounds=RO?(RO.indexOf(cfg.rounds|0)>=0?cfg.rounds|0:RO[0]):0;
 var LANG=Object.prototype.hasOwnProperty.call(STRINGS,cfg.lang)?cfg.lang:"en",L=STRINGS[LANG];
 function t(key,vars){var s=L[key]||"";if(vars)for(var v in vars)s=s.split("{"+v+"}").join(vars[v]);return s}
 var label=text(cfg.label||cfg.name)||"Timer",ready=sec(cfg.ready_s);ready=ready>=0?Math.min(ready,60):DEF.ready_s;
-var SOUND=bool(cfg.sound,true),SPEECH=bool(cfg.speech,false),VIBE=bool(cfg.vibrate,true);
-var intervals,rounds,segs,T,cues;
+var SOUND=bool(cfg.sound,true),SPEECH=bool(cfg.speech,false),VIBE=bool(cfg.vibrate,true),TICK=SOUND&&bool(cfg.tick,true),tickOn=TICK;
+var intervals,rounds,segs,T,cues,ticks;
 /* Timeline: optional ready segment followed by the intervals. Rebuilt (with its cues) when the round count changes. */
 function rebuild(){intervals=buildIntervals(cfg);rounds=RO?selRounds:((cfg.rounds|0)||intervals.reduce(function(a,x){return Math.max(a,x.round)},0));
  segs=[];T=0;if(ready>0){segs.push({kind:"ready",seconds:ready,label:"",round:0,ready:true})}
- intervals.forEach(function(x){segs.push(x)});segs.forEach(function(s){s.start=T;T+=s.seconds;s.end=T});cues=buildCues(segs)}
+ intervals.forEach(function(x){segs.push(x)});segs.forEach(function(s){s.start=T;T+=s.seconds;s.end=T});cues=buildCues(segs);ticks=TICK?buildTicks(segs,cues):[]}
 /* cue-schedule:begin (pure; also exercised by test_render_timer_html.py)
    Every time counting starts (end of the ready period, each interval change) and at the finish, play
    short, short, long: shorts 2 s and 1 s before the boundary, the long beep starting exactly on 0.
@@ -101,6 +102,13 @@ function buildCues(segs){var cues=[],i,j;
   for(j=2;j>=1;j--){var at=s.end-j;if(at>s.start+1e-6)cues.push({t:at,type:"short",tone:tone,n:j,event:ev})}
   cues.push({t:s.end,type:"long",tone:tone,event:ev,seg:i+1})}
  return cues}
+/* Soft clock tick once per second while counting, like a second hand. Ticks sit on whole seconds from the
+   start of each counting interval and are skipped within 0.5 s of any cue beep, so they never collide with
+   short, short, long. No ticks in the get-ready period: it is short and already ends with its own cue. */
+function buildTicks(segs,cues){var out=[],ct=cues.map(function(c){return c.t}).sort(function(a,b){return a-b}),p=0,i,k,t;
+ for(i=0;i<segs.length;i++){var s=segs[i];if(s.ready)continue;
+  for(k=1;s.start+k<s.end-1e-6;k++){t=s.start+k;while(p<ct.length&&ct[p]<t-0.5)p++;if(p<ct.length&&Math.abs(ct[p]-t)<0.5)continue;out.push(t)}}
+ return out}
 /* cue-schedule:end */
 rebuild();
 /* ---------- state (timestamp based: correct after throttling or suspension) ---------- */
@@ -119,19 +127,34 @@ var TONES={main:{short:523.25,long:659.25},rest:{short:440,long:392}},DUR={short
 function tone(f,at,d,peak){var o=ac.createOscillator(),g=ac.createGain();o.type="sine";o.frequency.setValueAtTime(f,at);
  g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(peak,at+0.03);g.gain.setValueAtTime(peak,at+Math.max(0.04,d*0.4));g.gain.exponentialRampToValueAtTime(0.001,at+d);g.gain.linearRampToValueAtTime(0,at+d+0.02);
  o.connect(g);g.connect(master);o.start(at);o.stop(at+d+0.05);nodes.push(o);o.onended=function(){var i=nodes.indexOf(o);if(i>=0)nodes.splice(i,1);try{o.disconnect();g.disconnect()}catch(e){}}}
+/* Tick: a 20 ms click (1.6 kHz sine plus a little noise, 2.5 ms decay) rendered once into a buffer, played at
+   TICK_GAIN, far below the cue beeps (0.28-0.32). One buffer-source node per tick, pre-scheduled like the cues. */
+var TICK_GAIN=0.05,tickBuf=null,tickGain=null;
+function tickBuffer(sr){var n=Math.round(sr*0.02),d=new Float32Array(n),seed=7,i,x,peak=0;
+ for(i=0;i<n;i++){seed=(seed*1103515245+12345)&0x7fffffff;x=(0.7*Math.sin(2*Math.PI*1600*i/sr)+0.3*(seed/0x3fffffff-1))*Math.exp(-i/(sr*0.0025));d[i]=x;peak=Math.max(peak,Math.abs(x))}
+ for(i=0;i<n;i++)d[i]/=peak;d[n-1]=0;return d}
+function playTick(at){if(!tickBuf){var d=tickBuffer(ac.sampleRate);tickBuf=ac.createBuffer(1,d.length,ac.sampleRate);tickBuf.getChannelData(0).set(d);tickGain=ac.createGain();tickGain.gain.value=TICK_GAIN;tickGain.connect(master)}
+ var b=ac.createBufferSource();b.buffer=tickBuf;b.connect(tickGain);b.start(at);nodes.push(b);b.onended=function(){var i=nodes.indexOf(b);if(i>=0)nodes.splice(i,1);try{b.disconnect()}catch(e){}}}
 function playCue(c,at){var f=(TONES[c.tone]||TONES.main)[c.type];if(f)tone(f,at,DUR[c.type],GAIN[c.type])}
 function clearScheduled(){nodes.slice().forEach(function(o){o.onended=null;try{o.stop(0)}catch(e){}try{o.disconnect()}catch(e){}});nodes=[];anchor=null;schedUntil=-1}
 function topUp(){if(!ac||!anchor||!running)return;var e=elapsed(),until=Math.min(T,e+HORIZON);if(until<=schedUntil)return;
- for(var i=0;i<cues.length;i++){var c=cues[i];if(c.t>schedUntil+1e-6&&c.t<=until+1e-6&&c.t>=e-0.05){playCue(c,Math.max(ac.currentTime+0.005,anchor.ctx+(c.t-anchor.el)))}}schedUntil=until}
+ for(var i=0;i<cues.length;i++){var c=cues[i];if(c.t>schedUntil+1e-6&&c.t<=until+1e-6&&c.t>=e-0.05){playCue(c,Math.max(ac.currentTime+0.005,anchor.ctx+(c.t-anchor.el)))}}
+ if(tickOn)for(i=0;i<ticks.length;i++){var k=ticks[i];if(k>schedUntil+1e-6&&k<=until+1e-6&&k>=e-0.05)playTick(Math.max(ac.currentTime+0.005,anchor.ctx+(k-anchor.el)))}schedUntil=until}
 function reschedule(){clearScheduled();if(!running||!ac||ac.state!=="running")return;var e=elapsed();anchor={ctx:ac.currentTime+0.03,el:e};schedUntil=e-0.06;topUp()}
 function driftCheck(){if(!running||!ac)return;if(ac.state!=="running"){ac.resume&&ac.resume().catch(function(){});return}
  if(!anchor){reschedule();return}var expect=anchor.ctx+(elapsed()-anchor.el);if(Math.abs(ac.currentTime-expect)>0.25)reschedule();else topUp()}
-/* Silent looping <audio> keeps the media/audio session alive (lock screen, iOS ringer switch). Generated at runtime: no network. */
-var keep=null;
-function keepAlive(){if(keep||!SOUND)return keep;try{var sr=8000,n=sr*10,buf=new ArrayBuffer(44+n),v=new DataView(buf),p=0;
+/* Truly silent looping <audio> keeps the media/audio session alive (lock screen, iOS ringer switch).
+   Generated at runtime (no network). Every sample is the 8-bit midpoint 128, i.e. zero amplitude: the earlier
+   loop nudged one sample every 400 (a 20 Hz click train), which was audible as a background buzz on iPhones. */
+/* keep-alive:begin (pure; also exercised by test_render_timer_html.py) */
+function silentWav(sr,seconds){var n=sr*seconds,buf=new ArrayBuffer(44+n),v=new DataView(buf),p=0;
  function s(x){for(var i=0;i<x.length;i++)v.setUint8(p++,x.charCodeAt(i))}function u32(x){v.setUint32(p,x,true);p+=4}function u16(x){v.setUint16(p,x,true);p+=2}
  s("RIFF");u32(36+n);s("WAVE");s("fmt ");u32(16);u16(1);u16(1);u32(sr);u32(sr);u16(1);u16(8);s("data");u32(n);
- for(var i=0;i<n;i++)v.setUint8(p++,128+((i%400)===0?1:0));
+ for(var i=0;i<n;i++)v.setUint8(p++,128);
+ return buf}
+/* keep-alive:end */
+var keep=null;
+function keepAlive(){if(keep||!SOUND)return keep;try{var buf=silentWav(8000,10);
  keep=new Audio(URL.createObjectURL(new Blob([buf],{type:"audio/wav"})));keep.loop=true;keep.preload="auto";keep.setAttribute("playsinline","");keep.setAttribute("webkit-playsinline","")}catch(e){keep=null}return keep}
 function keepPlay(){var a=keepAlive();if(a){var pr=a.play();if(pr&&pr.catch)pr.catch(function(){status()})}}
 function keepPause(){if(keep)try{keep.pause()}catch(e){}}
@@ -186,12 +209,13 @@ function toggle(){if(!started||finished)startFresh();else if(running)pause();els
 function reset(){$("msg").textContent="";running=false;started=false;finished=false;acc=0;lastSeg=-1;lastCue=-1;clearScheduled();keepPause();releaseAwake();mediaSession();status();draw()}
 function skip(){if(!started||finished)return;var e=elapsed(),i=segAt(e);if(i>=segs.length)return;acc=segs[i].end;while(lastCue+1<cues.length&&cues[lastCue+1].t<acc-1e-6)lastCue++;if(running){t0=now();reschedule()}tick()}
 $("start").onclick=toggle;$("reset").onclick=reset;$("skip").onclick=skip;
+var tb=$("tickOn");$("tickBox").hidden=!TICK;tb.checked=tickOn;tb.onchange=function(){tickOn=tb.checked;if(running)reschedule()};
 var aw=$("awake");aw.checked=wantAwake;aw.onchange=function(){wantAwake=aw.checked;if(wantAwake)acquireAwake();else releaseAwake();status()};
 document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"){if(running){acquireAwake();if(ac&&ac.state!=="running")ac.resume&&ac.resume().catch(function(){});if(keep&&keep.paused)keepPlay();reschedule()}tick()}});
 window.addEventListener("pageshow",tick);window.addEventListener("focus",tick);
-document.title=label;document.documentElement.lang=LANG;$("start").textContent=t("start");$("reset").textContent=t("reset");$("skip").textContent=t("skip");$("awakeLbl").textContent=t("keepAwake");
+document.title=label;document.documentElement.lang=LANG;$("start").textContent=t("start");$("reset").textContent=t("reset");$("skip").textContent=t("skip");$("awakeLbl").textContent=t("keepAwake");$("tickLbl").textContent=t("tick");
 if(msgs.length)$("msg").textContent=t(msgs[0]);
 setInterval(tick,200);draw();
-window.__timer={get segs(){return segs},get cues(){return cues},get total(){return T},get rounds(){return rounds},roundOptions:RO,pick:pickRounds,cfg:cfg,labels:L,state:function(){return{started:started,running:running,finished:finished,elapsed:elapsed(),seg:segAt(elapsed()),awake:awakeMode,audio:ac&&ac.state,scheduled:nodes.length}}};
+window.__timer={get segs(){return segs},get cues(){return cues},get ticks(){return ticks},tickOn:function(){return tickOn},get total(){return T},get rounds(){return rounds},roundOptions:RO,pick:pickRounds,cfg:cfg,labels:L,state:function(){return{started:started,running:running,finished:finished,elapsed:elapsed(),seg:segAt(elapsed()),awake:awakeMode,audio:ac&&ac.state,scheduled:nodes.length}}};
 })();
 </script></body></html>

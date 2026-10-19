@@ -33,6 +33,7 @@ The generator validates the config and injects it the same way `render_report_ht
 | `hiit_id` | none | Shown on the finished screen so the user can report it for `log_hiit` |
 | `lang` | `en` | UI language: `en` or `zh` (see Language below) |
 | `sound`, `speech`, `vibrate`, `keep_awake` | `true`, `false`, `true`, `true` | Feature switches |
+| `tick` | `true` | Soft once-per-second tick and its on-page toggle; `false` (CLI `--no-tick`) removes both (see Tick below) |
 
 The page also reads URL query parameters (`?duration=90&label=Plank&ready=3&lang=zh`) and the URL hash
 (base64url JSON like `hiit.html`, or `#duration=90&label=Plank`). Precedence: built-in defaults, then the
@@ -104,6 +105,24 @@ beeps.
 - Optional speech (`speech: true`) speaks the countdown numbers only while the page is visible. Beeps are the
   reliable path.
 
+## Tick
+
+While counting, a soft clock-like tick plays once per second, like a second hand. It is a 20 ms click (a
+1.6 kHz sine plus a little noise, decaying with a 2.5 ms time constant) rendered once into an `AudioBuffer`,
+played at gain 0.05, against 0.28-0.32 for the cue beeps.
+
+- Ticks sit on whole seconds from the start of each counting interval. A tick is skipped within 0.5 s of any
+  cue beep, so ticks never collide with short, short, long. In a 40 s work interval you hear 37 ticks, then
+  the two shorts and the long.
+- There are no ticks during the get-ready period: it is short (5 s by default) and already ends with its own
+  short, short, long, so silence before Go keeps the start cue distinct.
+- `buildTicks(segs, cues)` is a pure function next to `buildCues`, and the ticks are pre-scheduled on the same
+  `AudioContext` with the same horizon, top-up, and drift check. They keep playing with the screen off
+  whenever the beeps do. Pause, Skip, and Reset cancel them with the cues; Resume and a round change reschedule them.
+- A "Tick" toggle (zh: "滴答声"), on by default, sits under "Keep screen on". Turning it off mid-run reschedules
+  without ticks. `tick: false`, `?tick=0`, or the CLI flag `--no-tick` removes the ticks and the toggle
+  entirely. With `sound: false` there are no ticks either.
+
 ## Look
 
 The timer is always dark (`color-scheme: dark`, no `prefers-color-scheme` switch), so it looks the same in
@@ -132,7 +151,12 @@ suspended the page. The template layers several techniques:
    firing in the background. Pause, Skip, and Reset cancel the scheduled nodes; Resume reschedules them. A
    drift check reschedules if the audio clock and the wall clock disagree by more than 250 ms (for example
    after the context was suspended).
-3. **Audio session keep-alive.** A silent looping `<audio>` track plays while the timer runs, with Media Session
+3. **Audio session keep-alive.** A truly silent looping `<audio>` track plays while the timer runs: a 10 s,
+   8 kHz, 8-bit WAV built in JS where every sample is the midpoint value 128 (zero amplitude). An earlier
+   version nudged one sample in every 400 by one step, a 20 Hz click train at about -42 dBFS. That was the
+   continuous background buzz heard on iPhones, so it was removed. The element counts as playing media
+   whatever its samples are, and the pre-scheduled cues and ticks run on the `AudioContext`. No oscillator runs
+   continuously, and the hidden keep-awake videos are muted and have no audio track. The track plays with Media Session
    metadata (label and current phase), play/pause/next handlers, and position state. On iOS
    `navigator.audioSession.type = "playback"` is also set where supported. This keeps the page an active
    media session and on iOS also lets Web Audio play with the ringer switch on silent.
