@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime,timezone
 from normalize import norm
 import seed_data
-SCHEMA_VERSION=2
+SCHEMA_VERSION=3
 DEFAULT_DB="/workspace/vblife/workout-data/workout.db"
 SCHEMA="""
 CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
@@ -139,12 +139,57 @@ CREATE TABLE nutrition_entries(
 CREATE INDEX nutrition_local_date ON nutrition_entries(local_date,consumed_at);
 """)
     c.execute("UPDATE schema_version SET version=2")
+def _columns(c,table): return {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+
+# A routine is backfilled as HIIT only when that is clear: its name says HIIT, or every item is timed
+# (target_duration_s) with no sets, reps, weight or distance. Anything else stays 'standard'; a wrong
+# guess is fixed with update_routine(routine_type=...).
+HIIT_BACKFILL_SQL="""UPDATE workout_routines SET routine_type='hiit' WHERE routine_type='standard' AND (
+  lower(name) LIKE '%hiit%' OR (
+    EXISTS(SELECT 1 FROM workout_routine_items i WHERE i.routine_id=workout_routines.id) AND
+    NOT EXISTS(SELECT 1 FROM workout_routine_items i WHERE i.routine_id=workout_routines.id AND (
+      i.target_duration_s IS NULL OR i.target_duration_s<=0 OR i.target_sets IS NOT NULL OR i.target_reps IS NOT NULL
+      OR i.target_weight_kg IS NOT NULL OR i.target_distance_m IS NOT NULL))))"""
+
+def _migrate_v3(c):
+  """Additive and idempotent: routine type, circuit rounds and per-item HIIT work/rest seconds.
+  No column or row is dropped or rewritten; existing values are only copied into the new columns."""
+  with transaction(c):
+    cols=_columns(c,"workout_routines")
+    for name,definition in (
+      ("routine_type","routine_type TEXT NOT NULL DEFAULT 'standard' CHECK(routine_type IN('standard','hiit'))"),
+      ("rounds","rounds INTEGER CHECK(rounds IS NULL OR rounds BETWEEN 1 AND 100)"),
+      ("round_options_json","round_options_json TEXT")):
+      if name not in cols: c.execute("ALTER TABLE workout_routines ADD COLUMN "+definition)
+    cols=_columns(c,"workout_routine_items")
+    for name,definition in (
+      ("work_seconds","work_seconds INTEGER CHECK(work_seconds IS NULL OR work_seconds BETWEEN 1 AND 3600)"),
+      ("rest_seconds","rest_seconds INTEGER CHECK(rest_seconds IS NULL OR rest_seconds BETWEEN 0 AND 3600)")):
+      if name not in cols: c.execute("ALTER TABLE workout_routine_items ADD COLUMN "+definition)
+    if _version(c)<3:
+      c.execute(HIIT_BACKFILL_SQL)
+      c.execute("""UPDATE workout_routine_items SET work_seconds=target_duration_s WHERE work_seconds IS NULL
+        AND target_duration_s BETWEEN 1 AND 3600 AND routine_id IN(SELECT id FROM workout_routines WHERE routine_type='hiit')""")
+      c.execute("UPDATE schema_version SET version=3")
+
+def connect_readonly(path=None):
+  """Open an existing database read-only (no migration, no reconcile). Used by offline tools such as
+  render_timer_html.py --routine-id; the server applies migrations on startup."""
+  path=path or os.environ.get("WORKOUT_DB") or DEFAULT_DB
+  if not os.path.exists(path): raise FileNotFoundError(f"workout database not found: {path}")
+  c=sqlite3.connect("file:"+os.path.abspath(path)+"?mode=ro",uri=True); c.row_factory=sqlite3.Row
+  v=_version(c)
+  if v!=SCHEMA_VERSION:
+    c.close(); raise RuntimeError(f"workout database is at schema version {v}, expected {SCHEMA_VERSION}; start the workout-bot server once to migrate it")
+  return c
+
 def init(c):
   c.executescript(SCHEMA)
   if c.execute("SELECT count(*) FROM schema_version").fetchone()[0]==0:
     c.execute("INSERT INTO schema_version VALUES(1)")
   c.commit()
   if _version(c)<2: _migrate_v2(c)
+  if _version(c)<3: _migrate_v3(c)
   if _version(c)!=SCHEMA_VERSION: raise RuntimeError(f"unsupported schema version {_version(c)}")
   if c.execute("SELECT count(*) FROM exercises").fetchone()[0]==0: seed(c)
   c.commit()

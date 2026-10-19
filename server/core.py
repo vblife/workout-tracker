@@ -285,8 +285,27 @@ def hiit_config(rounds=20,segments=None,name=None,warmup_s=10,cooldown_s=60):
     if not isinstance(v,int) or not 0<=v<=3600: raise UserError("warmup_s/cooldown_s must be 0-3600")
   total=warmup_s+cooldown_s+rounds*sum(x["seconds"] for x in clean)-(clean[-1]["seconds"] if clean[-1]["kind"]=="rest" else 0)  # UI skips final rest
   return {"name":name or "HIIT","rounds":rounds,"segments":clean,"warmup_s":warmup_s,"cooldown_s":cooldown_s,"planned_seconds":total}
-def create_hiit(c,**kw):
-  cfg=hiit_config(**kw)
+def routine_hiit_config(routine,lang="en",rounds=None,name=None,warmup_s=10,cooldown_s=60):
+  """hiit_config for a saved HIIT routine: each item is one work interval (its exercise name) followed by its
+  rest; rounds repeat the whole circuit (default the routine's rounds, else 1). The final rest is skipped by the UIs."""
+  import routines
+  if lang not in("en","zh"): raise UserError("lang must be en or zh")
+  segments=routines.hiit_segments(routine,lang)
+  options=routine.get("round_options")
+  n=rounds if rounds is not None else (routine.get("rounds") or 1)
+  if options and n not in options: raise UserError(f"rounds must be one of the routine's round_options {options}")
+  cfg=hiit_config(rounds=n,segments=segments,name=name or routine["name"],warmup_s=warmup_s,cooldown_s=cooldown_s)
+  cfg["routine_id"]=routine["routine_id"]
+  if options: cfg["round_options"]=options
+  return cfg
+def create_hiit(c,routine_id=None,lang="en",**kw):
+  if routine_id is not None:
+    import routines
+    if kw.get("segments") is not None: raise UserError("pass either routine_id or segments, not both")
+    kw.pop("segments",None)
+    cfg=routine_hiit_config(routines.get_routine(c,routine_id),lang,**kw)
+  else:
+    cfg=hiit_config(**kw)
   hid=c.execute("INSERT INTO hiit_workouts(name,config_json,planned_seconds,status,created_at) VALUES(?,?,?,'planned',?)",
                 (cfg["name"],json.dumps(cfg,ensure_ascii=False),cfg["planned_seconds"],dbm.now())).lastrowid
   c.commit(); return {"hiit_id":hid,**cfg}

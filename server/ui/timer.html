@@ -186,10 +186,12 @@ function draw(){var e=elapsed(),i=segAt(e),s=segs[i],b=document.body;
  else{var cur=started?s:(segs[0].ready&&segs[1]?segs[1]:segs[0]),rem=started?s.end-e:cur.seconds;
   $("phase").textContent=started?phaseText(s):phaseText(cur);$("time").textContent=s.ready&&started?String(Math.ceil(rem-1e-6)):fmt(rem);
   var parts=[];if(rounds>1&&cur.round>0)parts.push(t("round",{r:cur.round,n:rounds}));if(intervals.length>1||ready>0)parts.push(t("left",{t:fmt(T-(started?e:0)-(started?0:ready))}));$("sub").textContent=parts.join(" \u00b7 ");
-  var nx=started?segs[i+1]:null;$("next").textContent=nx?t("next")+": "+(phaseText(nx)||"")+" "+fmt(nx.seconds):""}
+  var nx=started?segs[i+1]:null,up=upNext(i);$("next").textContent=up?t("next")+": "+up.label:nx?t("next")+": "+(phaseText(nx)||"")+" "+fmt(nx.seconds):""}
  $("bar").firstChild.style.width=(T?100*e/T:0)+"%";
  var st=$("start");st.textContent=running?t("pause"):(started&&!finished?t("resume"):t("start"));st.className=running?"pause":"";
  $("skip").hidden=intervals.length<2;$("skip").disabled=!started||finished;drawRounds()}
+/* During a work interval followed by rest, "Next" names the upcoming exercise (e.g. a routine circuit). */
+function upNext(i){var s=segs[i],r=segs[i+1],w=segs[i+2];return started&&s&&s.kind==="work"&&r&&r.kind==="rest"&&w&&w.kind==="work"&&w.label?w:null}
 function drawRounds(){var box=$("rsel");if(!RO){box.hidden=true;return}box.hidden=started;$("rselLbl").textContent=t("rounds");
  var bs=$("rbtns").children;for(var i=0;i<bs.length;i++){bs[i].setAttribute("aria-pressed",String(RO[i]===selRounds));bs[i].disabled=started}}
 function pickRounds(n){if(started||!RO||RO.indexOf(n)<0)return;selRounds=n;rebuild();lastSeg=-1;lastCue=-1;draw()}

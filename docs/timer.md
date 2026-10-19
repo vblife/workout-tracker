@@ -39,6 +39,25 @@ The page also reads URL query parameters (`?duration=90&label=Plank&ready=3&lang
 (base64url JSON like `hiit.html`, or `#duration=90&label=Plank`). Precedence: built-in defaults, then the
 injected config, then the query string, then the hash.
 
+## From a saved HIIT routine
+
+A routine with `routine_type: "hiit"` (see `docs/database.md`) can drive the timer in two ways:
+
+- `hiit_timer` with `routine_id`, optionally `rounds` and `lang`, and then `--config` with that result. Only
+  this path creates a `hiit_id`, so it is the one to use when completion should be logged.
+- `--routine-id N` on the CLI. This reads the routine read-only through the server's data layer
+  (`db.connect_readonly` + `routines.get_routine`) from `--db PATH` or `$WORKOUT_DB`. It accepts `--rounds N`
+  (one number), `--label`, `--lang`, `--ready`, and `--no-tick`. It cannot be combined with `--config`,
+  `--duration`, `--work`, or `--rest`.
+
+Both paths build the same config. Each item becomes one work interval with its exercise name (`name_zh` with
+`lang zh`), followed by its `rest_seconds`; a rest of 0 means none. Rounds repeat the whole circuit: the
+routine's `rounds`, or 1. The final rest is skipped, and the default 10 s warm-up and 60 s cool-down apply.
+If the routine has `round_options`, the page shows the round selector; otherwise the count is fixed. During a
+work interval that is followed by rest, the "Next" line names the upcoming exercise ("Next: Jump Squat", in zh
+"下一个: ..."). During rest it shows the next work interval and its length, as before. All other behavior
+(theme, cues, tick, keep-alive, language) is unchanged.
+
 ## Round selector
 
 For work/rest rounds (`segments` + `rounds`, one exercise per round), `round_options` lets the user pick the

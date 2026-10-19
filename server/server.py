@@ -50,8 +50,10 @@ TOOLS=[
  {"name":"query_stats","title":"Query stats","description":"Time series grouped by day/week (Monday start)/month in the user's configured timezone. metric: e1rm|volume|frequency|best_set|reps. Dates YYYY-MM-DD inclusive.",
   "inputSchema":O({"metric":{"type":"string","enum":["e1rm","volume","frequency","best_set","reps"]},"exercise":{"type":"string"},"from_date":{"type":"string"},"to_date":{"type":"string"},
     "group_by":{"type":"string","enum":["day","week","month"],"default":"week"}},["metric"]),"annotations":{"readOnlyHint":True}},
- {"name":"hiit_timer","title":"HIIT Timer","description":"Show an interactive HIIT interval timer. Each round runs the segments in order (final rest of last round skipped). Completion is logged automatically via log_hiit from the UI.",
-  "inputSchema":O({"name":{"type":"string"},"rounds":{"type":"integer","minimum":1,"maximum":100,"default":20},"segments":{"type":"array","items":SEG,"minItems":1},
+ {"name":"hiit_timer","title":"HIIT Timer","description":"Show an interactive HIIT interval timer. Each round runs the segments in order (final rest of last round skipped). Pass routine_id to time a saved hiit routine. Completion is logged automatically via log_hiit from the UI.",
+  "inputSchema":O({"name":{"type":"string"},"rounds":{"type":"integer","minimum":1,"maximum":100,"description":"Circuit repeats. Omit to use the default: 20 for ad hoc segments; with routine_id, the routine's rounds (or 1). With routine_id it must be one of the routine's round_options if it has them"},"segments":{"type":"array","items":SEG,"minItems":1},
+    "routine_id":{"type":"integer","description":"Build the timer from a saved hiit routine instead of segments: one work interval per exercise with its rest after it"},
+    "lang":{"type":"string","enum":["en","zh"],"default":"en","description":"With routine_id: exercise-name language for the timer labels"},
     "warmup_s":{"type":"integer","minimum":0,"default":10},"cooldown_s":{"type":"integer","minimum":0,"default":60}}),
   "_meta":_uimeta(HIIT_URI,"Setting up timer…","Timer ready")},
  {"name":"log_hiit","title":"Log HIIT result","description":"Record a HIIT timer result (called by the timer UI, or by the model when the user says they finished on a client without UI).",
@@ -80,6 +82,13 @@ ROUTINE_ITEM=O({"position":{"type":"integer","minimum":1},"exercise":{"type":"st
   "target_sets":{"type":"integer","minimum":1},"target_reps":{"type":"integer","minimum":1},"target_weight":{"type":"number","minimum":0},
   "unit":{"type":"string","enum":["lb","kg"]},"target_duration_s":{"type":"integer","minimum":1},"target_distance_m":{"type":"number","minimum":0},"notes":{"type":"string"}})
 SESSION_ITEM=ROUTINE_ITEM
+HIIT_ROUTINE_ITEM={**ROUTINE_ITEM,"properties":{**ROUTINE_ITEM["properties"],
+  "work_seconds":{"type":"integer","minimum":1,"maximum":3600,"description":"hiit routines only: work interval for this exercise (default 40, or target_duration_s)"},
+  "rest_seconds":{"type":"integer","minimum":0,"maximum":3600,"description":"hiit routines only: rest after this exercise (default 20; 0 = no rest)"}}}
+ROUTINE_TYPE={"type":"string","enum":["standard","hiit"]}
+ROUTINE_ROUNDS={"routine_type":{**ROUTINE_TYPE,"description":"hiit routines can be timed with hiit_timer(routine_id); default standard"},
+  "rounds":{"type":"integer","minimum":1,"maximum":100,"description":"hiit only: circuit repeats (default 1 pass)"},
+  "round_options":{"type":"array","items":{"type":"integer","minimum":1,"maximum":100},"description":"hiit only: 2-6 round counts offered by the HTML timer's round selector; [] clears"}}
 NUTRIENT_PROPS={"consumed_at":{"type":"string"},"capture_timezone":{"type":"string"},"calories_kcal":{"type":["number","null"],"minimum":0},
   "protein_g":{"type":["number","null"],"minimum":0},"carbohydrates_g":{"type":["number","null"],"minimum":0},"fat_g":{"type":["number","null"],"minimum":0},
   "fiber_g":{"type":["number","null"],"minimum":0},"saturated_fat_g":{"type":["number","null"],"minimum":0},"sugar_g":{"type":["number","null"],"minimum":0},
@@ -97,10 +106,10 @@ TOOLS.extend([
  {"name":"list_body_weight","title":"List body weight","description":"List optional body-weight entries.","inputSchema":O({"limit":{"type":"integer","minimum":1,"maximum":1000}}),"annotations":{"readOnlyHint":True}},
  {"name":"update_body_weight","title":"Correct body weight","description":"Correct one body-weight entry and recalculate affected calorie estimates.","inputSchema":O({"weight_id":{"type":"integer"},"value":{"type":"number","exclusiveMinimum":0},"unit":{"type":"string","enum":["lb","kg"]},"measured_at":{"type":"string"}},("weight_id","value","unit"))},
  {"name":"delete_body_weight","title":"Delete body weight","description":"Delete one body-weight entry and recalculate affected calorie estimates.","inputSchema":O({"weight_id":{"type":"integer"}},("weight_id",)),"annotations":{"destructiveHint":True}},
- {"name":"create_routine","title":"Create workout routine","description":"Create a reusable routine directly or from a completed workout the user explicitly asked to save. The source workout is unchanged.","inputSchema":O({"name":{"type":"string"},"description":{"type":"string"},"estimated_duration_min":{"type":"number","exclusiveMinimum":0},"source_session_id":{"type":"integer"},"items":{"type":"array","items":ROUTINE_ITEM,"minItems":1}},("name",))},
- {"name":"list_routines","title":"List routines","description":"List reusable workout routines.","inputSchema":O({"include_archived":{"type":"boolean"}}),"annotations":{"readOnlyHint":True}},
+ {"name":"create_routine","title":"Create workout routine","description":"Create a reusable routine directly or from a completed workout the user explicitly asked to save. The source workout is unchanged.","inputSchema":O({"name":{"type":"string"},"description":{"type":"string"},"estimated_duration_min":{"type":"number","exclusiveMinimum":0},"source_session_id":{"type":"integer"},"items":{"type":"array","items":HIIT_ROUTINE_ITEM,"minItems":1},**ROUTINE_ROUNDS},("name",))},
+ {"name":"list_routines","title":"List routines","description":"List reusable workout routines, optionally only one routine_type.","inputSchema":O({"include_archived":{"type":"boolean"},"routine_type":ROUTINE_TYPE}),"annotations":{"readOnlyHint":True}},
  {"name":"get_routine","title":"Get routine","description":"Retrieve one routine and ordered targets.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",)),"annotations":{"readOnlyHint":True}},
- {"name":"update_routine","title":"Update routine","description":"Edit future routine starts; existing workout snapshots do not change.","inputSchema":O({"routine_id":{"type":"integer"},"name":{"type":"string"},"description":{"type":"string"},"estimated_duration_min":{"type":"number"},"items":{"type":"array","items":ROUTINE_ITEM,"minItems":1}},("routine_id",))},
+ {"name":"update_routine","title":"Update routine","description":"Edit future routine starts; existing workout snapshots do not change.","inputSchema":O({"routine_id":{"type":"integer"},"name":{"type":"string"},"description":{"type":"string"},"estimated_duration_min":{"type":"number"},"items":{"type":"array","items":HIIT_ROUTINE_ITEM,"minItems":1},**ROUTINE_ROUNDS},("routine_id",))},
  {"name":"archive_routine","title":"Archive routine","description":"Archive a routine without breaking historical workout links.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",)),"annotations":{"destructiveHint":True}},
  {"name":"restore_routine","title":"Restore routine","description":"Restore an archived routine.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",))},
  {"name":"start_routine","title":"Start routine","description":"Start a saved routine by creating an independent active-workout snapshot. Never replace an existing active workout.","inputSchema":O({"routine_id":{"type":"integer"},"idempotency_key":{"type":"string"}},("routine_id",))},
