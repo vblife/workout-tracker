@@ -149,6 +149,23 @@ class TimerConfigTest(unittest.TestCase):
                 data = json.loads(injected(f.read()))
             self.assertEqual((data["label"], data["total_s"], len(data["intervals"])), ("Rest", 120, 1))
 
+    def test_cli_bad_input_is_a_clean_usage_error(self):
+        script = os.path.join(os.path.dirname(r.__file__), "render_timer_html.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "t.html")
+            bad_json = os.path.join(tmp, "bad.json")
+            with open(bad_json, "w", encoding="utf-8") as f:
+                f.write("{not json")
+            not_object = os.path.join(tmp, "list.json")
+            with open(not_object, "w", encoding="utf-8") as f:
+                json.dump([1, 2], f)
+            for args in (["--duration", "abc"], ["--config", bad_json], ["--config", not_object, "--duration", "30"]):
+                res = subprocess.run([sys.executable, script, out, *args], capture_output=True, text=True)
+                self.assertEqual(res.returncode, 2, args)
+                self.assertNotIn("Traceback", res.stderr, args)
+                self.assertIn("error:", res.stderr, args)
+                self.assertFalse(os.path.exists(out), args)
+
 
 if __name__ == "__main__":
     unittest.main()
