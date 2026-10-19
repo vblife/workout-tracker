@@ -51,7 +51,7 @@ TOOLS=[
   "inputSchema":O({"metric":{"type":"string","enum":["e1rm","volume","frequency","best_set","reps"]},"exercise":{"type":"string"},"from_date":{"type":"string"},"to_date":{"type":"string"},
     "group_by":{"type":"string","enum":["day","week","month"],"default":"week"}},["metric"]),"annotations":{"readOnlyHint":True}},
  {"name":"hiit_timer","title":"HIIT Timer","description":"Show an interactive HIIT interval timer. Each round runs the segments in order (final rest of last round skipped). Pass routine_id to time a saved hiit routine. Completion is logged automatically via log_hiit from the UI.",
-  "inputSchema":O({"name":{"type":"string"},"rounds":{"type":"integer","minimum":1,"maximum":100,"default":20,"description":"Circuit repeats. With routine_id: defaults to the routine's rounds (or 1) and must be one of its round_options if it has them"},"segments":{"type":"array","items":SEG,"minItems":1},
+  "inputSchema":O({"name":{"type":"string"},"rounds":{"type":"integer","minimum":1,"maximum":100,"description":"Circuit repeats. Omit to use the default: 20 for ad hoc segments; with routine_id, the routine's rounds (or 1). With routine_id it must be one of the routine's round_options if it has them"},"segments":{"type":"array","items":SEG,"minItems":1},
     "routine_id":{"type":"integer","description":"Build the timer from a saved hiit routine instead of segments: one work interval per exercise with its rest after it"},
     "lang":{"type":"string","enum":["en","zh"],"default":"en","description":"With routine_id: exercise-name language for the timer labels"},
     "warmup_s":{"type":"integer","minimum":0,"default":10},"cooldown_s":{"type":"integer","minimum":0,"default":60}}),

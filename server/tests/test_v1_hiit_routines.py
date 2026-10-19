@@ -337,6 +337,9 @@ class HiitRoutineSchemaTest(unittest.TestCase):
         self.assertEqual(tools["list_routines"]["properties"]["routine_type"]["enum"], ["standard", "hiit"])
         self.assertIn("routine_id", tools["hiit_timer"]["properties"])
         self.assertEqual(tools["hiit_timer"]["properties"]["lang"]["enum"], ["en", "zh"])
+        # No schema default for rounds: a client that fills defaults would otherwise
+        # override the routine's own rounds when routine_id is passed.
+        self.assertNotIn("default", tools["hiit_timer"]["properties"]["rounds"])
         # Active-workout items keep the original contract.
         self.assertNotIn("work_seconds", tools["add_workout_item"]["properties"]["item"]["properties"])
 
