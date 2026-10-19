@@ -37,12 +37,33 @@ injected config, then the query string, then the hash.
 
 ## Cues
 
-- Start: get-ready period (default 5 s), beeps at 3, 2, 1, then a distinct rising "go" sound.
-- Every interval: beeps for the last 3 seconds, then a transition sound (rising "go" into work, falling tone
-  into rest) and a short vibration.
-- End: last-3-seconds beeps, a distinct four-note finish sound, and a longer vibration pattern.
+One cue shape is used everywhere: **short, short, long**. The two short beeps play 2 s and 1 s before a
+boundary and the long beep starts exactly on 0, so it doubles as the countdown. There are no separate 3-2-1
+beeps.
+
+- Start: get-ready period (default 5 s); short, short, long as counting begins. With `ready_s: 0` only the
+  long beep plays at Start, because there is no time for the short beeps.
+- Every interval change in a sequence: short, short, long into the next interval, with a short vibration.
+  Changes into rest or cool-down use the same shape at a lower pitch, so you can tell work from rest
+  without looking.
+- End: the same short, short, long, plus a longer vibration pattern.
+- A phase shorter than 3 s only gets the short beeps that fit after it starts.
+- Tones are soft sines (work/start 523 Hz short and 659 Hz long; rest 440 Hz short and 392 Hz long). They use
+  a 30 ms attack, an exponential release, and moderate gain. No square waves and no high pitches.
 - Optional speech (`speech: true`) speaks the countdown numbers only while the page is visible. Beeps are the
   reliable path.
+
+## Look
+
+The timer is always dark (`color-scheme: dark`, no `prefers-color-scheme` switch), so it looks the same in
+light and dark mode and inside in-app viewers. Each state has its own dark background: idle, get-ready, work,
+rest, warm-up, cool-down, plain countdown, paused, and done. Text, buttons, and the progress bar come from one
+palette of CSS variables in `:root`. `test_render_timer_html.py` checks the palette against WCAG AA:
+
+- Body text on every state background: 14.1-17.1:1.
+- Secondary text: 9.9-11.9:1.
+- Buttons: 6.1-11.7:1.
+- Progress bar (non-text, 3:1 required): track vs. background is at least 3.5:1, and fill vs. track is 3.6:1.
 
 ## How it keeps working with the screen off
 
@@ -53,7 +74,7 @@ suspended the page. The template layers several techniques:
    pauses), so the display and the finish are correct the moment the page runs again, however long JS was
    throttled or frozen. Verified in headless Chrome by freezing the page for 6 s mid-run.
 2. **Pre-scheduled Web Audio cues.** On Start, one `AudioContext` (created inside the tap so it is allowed to
-   play) schedules every beep as oscillators at absolute `AudioContext` times (up to 20 minutes ahead,
+   play) schedules every beep as sine oscillators at absolute `AudioContext` times (up to 20 minutes ahead,
    topped up while running). Scheduled audio runs on the audio thread, so it does not depend on JS timers
    firing in the background. Pause, Skip, and Reset cancel the scheduled nodes; Resume reschedules them. A
    drift check reschedules if the audio clock and the wall clock disagree by more than 250 ms (for example

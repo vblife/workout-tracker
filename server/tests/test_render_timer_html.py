@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -169,3 +170,108 @@ class TimerConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _hex_luminance(color):
+    color = color.lstrip("#")
+    if len(color) == 3:
+        color = "".join(c * 2 for c in color)
+    channels = [int(color[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def contrast(a, b):
+    hi, lo = sorted((_hex_luminance(a), _hex_luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def palette():
+    html = template()
+    root = re.search(r":root\{(.*?)\}", html, re.S).group(1)
+    return dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{3,6})\b", root))
+
+
+STATES = ("idle", "ready", "work", "rest", "warmup", "cooldown", "interval", "paused", "done")
+
+
+class TimerThemeTest(unittest.TestCase):
+    def test_dark_theme_in_every_state_without_light_flip(self):
+        html = template()
+        css = html[html.index("<style>"):html.index("</style>")]
+        self.assertIn("color-scheme:dark", css)
+        self.assertNotIn("prefers-color-scheme", html)
+        self.assertNotIn("light", re.search(r"color-scheme:([^;]*);", css).group(1))
+        for state in STATES:
+            self.assertIn(f"body.{state}{{background:var(--bg-{state})}}", css)
+            self.assertLess(_hex_luminance(palette()[f"bg-{state}"]), 0.05, state)  # genuinely dark
+        # Every colour outside :root comes from the palette variables.
+        rest = css[css.index("}", css.index(":root{")) + 1:]
+        self.assertIsNone(re.search(r":\s*#[0-9a-fA-F]{3,8}\b", rest))
+        self.assertNotRegex(rest, r"rgba?\(|opacity:\s*\.[0-5]")
+
+    def test_palette_meets_wcag_aa(self):
+        p = palette()
+        ratios = {}
+        for state in STATES:
+            bg = p[f"bg-{state}"]
+            ratios[f"fg/{state}"] = contrast(p["fg"], bg)
+            ratios[f"muted/{state}"] = contrast(p["muted"], bg)
+        ratios["button"] = contrast(p["btn-fg"], p["btn-bg"])
+        ratios["start"] = contrast(p["start-fg"], p["start-bg"])
+        ratios["pause"] = contrast(p["pause-fg"], p["pause-bg"])
+        ratios["disabled"] = contrast(p["disabled-fg"], p["disabled-bg"])
+        for name, ratio in ratios.items():
+            self.assertGreaterEqual(ratio, 4.5, f"{name}: {ratio:.2f}")
+        # Progress bar: track visible on every background, fill visible on the track (WCAG 1.4.11, 3:1).
+        for state in STATES:
+            self.assertGreaterEqual(contrast(p["bar-track"], p[f"bg-{state}"]), 3.0, state)
+        self.assertGreaterEqual(contrast(p["bar-fill"], p["bar-track"]), 3.0)
+
+
+class TimerSoundTest(unittest.TestCase):
+    def test_soft_sine_tones_only(self):
+        html = template()
+        for harsh in ("square", "sawtooth", "triangle"):
+            self.assertNotIn(harsh, html)
+        self.assertIn('o.type="sine"', html)
+        tones = re.search(r"var TONES=(\{.*?\}\}),", html).group(1)
+        freqs = [float(x) for x in re.findall(r":(\d+(?:\.\d+)?)", tones)]
+        self.assertEqual(len(freqs), 4)
+        for f in freqs:
+            self.assertTrue(380 <= f <= 700, f)
+        self.assertNotRegex(html, r"tone\(\d")  # every beep goes through playCue -> TONES
+        self.assertIn("linearRampToValueAtTime(peak,at+0.03)", html)  # gentle attack
+        self.assertIn("exponentialRampToValueAtTime(0.001,at+d)", html)  # gentle release
+
+    def _cues(self, segs):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        html = template()
+        code = html[html.index("/* cue-schedule:begin"):html.index("/* cue-schedule:end */")]
+        t = 0
+        for s in segs:
+            s["start"], t = t, t + s["seconds"]
+            s["end"] = t
+        script = code + "\nprocess.stdout.write(JSON.stringify(buildCues(" + json.dumps(segs) + ")));"
+        out = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True).stdout
+        return [(c["t"], c["type"], c["tone"], c["event"]) for c in json.loads(out)]
+
+    def test_short_short_long_at_begin_transitions_and_finish(self):
+        cues = self._cues([{"kind": "ready", "ready": True, "seconds": 5}, {"kind": "work", "seconds": 40},
+                           {"kind": "rest", "seconds": 20}, {"kind": "work", "seconds": 40}])
+        self.assertEqual(cues, [
+            (3, "short", "main", "begin"), (4, "short", "main", "begin"), (5, "long", "main", "begin"),
+            (43, "short", "rest", "next"), (44, "short", "rest", "next"), (45, "long", "rest", "next"),
+            (63, "short", "main", "next"), (64, "short", "main", "next"), (65, "long", "main", "next"),
+            (103, "short", "main", "finish"), (104, "short", "main", "finish"), (105, "long", "main", "finish"),
+        ])
+
+    def test_single_countdown_without_ready_and_short_segments(self):
+        self.assertEqual(self._cues([{"kind": "interval", "seconds": 120}]), [
+            (0, "long", "main", "begin"),
+            (118, "short", "main", "finish"), (119, "short", "main", "finish"), (120, "long", "main", "finish")])
+        # A 2 s ready period only has room for one short beep before the long one.
+        self.assertEqual(self._cues([{"kind": "ready", "ready": True, "seconds": 2}, {"kind": "interval", "seconds": 1}]), [
+            (1, "short", "main", "begin"), (2, "long", "main", "begin"), (3, "long", "main", "finish")])
