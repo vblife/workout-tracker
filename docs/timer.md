@@ -13,6 +13,9 @@ python server/render_timer_html.py /workspace/timer-plank.html --duration 1:30 -
 
 # work/rest sequence or a hiit_timer result (rounds, segments, warmup_s, cooldown_s, hiit_id)
 python server/render_timer_html.py /workspace/hiit-timer.html --config hiit.json
+
+# default 40/20 HIIT: one file, the user picks 10 or 20 rounds before Start
+python server/render_timer_html.py /workspace/hiit-timer.html --work 40 --rest 20 --rounds 10,20 --label "HIIT 40/20"
 ```
 
 The generator validates the config and injects it the same way `render_report_html.py` does:
@@ -26,6 +29,7 @@ The generator validates the config and injects it the same way `render_report_ht
 | `ready_s` | `5` | Get-ready period before the first interval (0-60) |
 | `intervals` | none | `[{"kind": "work"/"rest"/"warmup"/"cooldown"/"interval", "seconds": 40, "label": "Burpees"}]` |
 | `rounds`, `segments`, `warmup_s`, `cooldown_s` | none | A `hiit_timer` result; expanded like `hiit.html` (final rest of the last round skipped) |
+| `round_options` | none | With `segments`: round counts offered on the idle screen, e.g. `[10, 20]` (see Round selector) |
 | `hiit_id` | none | Shown on the finished screen so the user can report it for `log_hiit` |
 | `lang` | `en` | UI language: `en` or `zh` (see Language below) |
 | `sound`, `speech`, `vibrate`, `keep_awake` | `true`, `false`, `true`, `true` | Feature switches |
@@ -33,6 +37,33 @@ The generator validates the config and injects it the same way `render_report_ht
 The page also reads URL query parameters (`?duration=90&label=Plank&ready=3&lang=zh`) and the URL hash
 (base64url JSON like `hiit.html`, or `#duration=90&label=Plank`). Precedence: built-in defaults, then the
 injected config, then the query string, then the hash.
+
+## Round selector
+
+For work/rest rounds (`segments` + `rounds`, one exercise per round), `round_options` lets the user pick the
+round count on the page before Start. The idle screen shows one large toggle button per option ("10 rounds",
+"20 rounds"; "10 组", "20 组" with `lang: "zh"`) under a "Rounds" / "组数" heading. Picking one rebuilds the
+interval sequence, the progress bar, the total time, and the cue schedule for that count. After Start the
+selector is hidden (and ignored); Reset shows it again. `?rounds=20` or `#rounds=20` preselects an option.
+The choice is not written back to the URL, so a base64 config hash is never overwritten.
+
+Totals keep the skip-final-rest rule: `warmup + n*work + (n-1)*rest + cooldown`, plus the get-ready period.
+With 40/20 that is 9:40 for 10 rounds and 19:40 for 20 rounds (plus 5 s get ready).
+
+| CLI | Config | Result |
+|---|---|---|
+| `--work 40 --rest 20 --rounds 10,20` | `"segments": [work 40, rest 20], "round_options": [10, 20]` | Selector, default 10 |
+| `... --rounds 10,20 --default-rounds 20` | `..., "round_options": [10, 20], "rounds": 20` | Selector, default 20 |
+| `--work 40 --rest 20 --rounds 10` | `..., "rounds": 10` | Fixed 10 rounds, no selector |
+
+On the CLI the first `--rounds` value is the default unless `--default-rounds` is given; `--rest` is optional.
+`--work`/`--rest` take seconds or `m:ss`. `--rounds` replaces any rounds or intervals from `--config` and keeps
+its other keys, such as `label` or `lang`. Validation fails with one `error:` line and exit 2. Round counts must
+be whole numbers from 1 to 100. `round_options` needs 2 to 6 distinct values, which are sorted ascending. The
+default must be one of the options. `round_options` only works with `segments`, never with `intervals` or
+`duration`. `--work` needs `--rounds` and the reverse, and neither can be combined with `--duration`. The injected
+config carries `round_options`, the cleaned `segments`, and `round_totals` (for example
+`{"10": 580, "20": 1180}`). `intervals`/`total_s` describe the default count.
 
 ## Language
 
@@ -83,6 +114,8 @@ palette of CSS variables in `:root`. `test_render_timer_html.py` checks the pale
 - Body text on every state background: 14.1-17.1:1.
 - Secondary text: 9.9-11.9:1.
 - Buttons: 6.1-11.7:1.
+- Round toggles: selected 10.9:1 and unselected 11.6:1. The selected vs. unselected fill is 7.4:1, so the
+  selection is clear without relying on text.
 - Progress bar (non-text, 3:1 required): track vs. background is at least 3.5:1, and fill vs. track is 3.6:1.
 
 ## How it keeps working with the screen off

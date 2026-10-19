@@ -6,7 +6,8 @@
  --fg:#f5f7fa;--muted:#c9d1dc;--accent:#8ccfff;
  --bg-idle:#10151c;--bg-ready:#13213a;--bg-work:#3d1518;--bg-rest:#0e2b1a;--bg-warmup:#1a2342;--bg-cooldown:#1a2342;--bg-interval:#132233;--bg-paused:#22262e;--bg-done:#1b2433;
  --btn-bg:#2b3445;--btn-fg:#f5f7fa;--btn-line:#5b6678;--start-bg:#1e6b2a;--start-fg:#ffffff;--pause-bg:#8a4a00;--pause-fg:#ffffff;--disabled-bg:#1f2632;--disabled-fg:#9aa5b5;
- --bar-track:#6f7b8f;--bar-fill:#d6efff}
+ --bar-track:#6f7b8f;--bar-fill:#d6efff;
+ --sel-bg:#8ccfff;--sel-fg:#0b1520;--unsel-bg:#2b3445;--unsel-fg:#f5f7fa}
 *{box-sizing:border-box}html{background:var(--bg-idle)}html,body{height:100%}
 body{margin:0;font-family:-apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg-idle);text-align:center;transition:background .3s;-webkit-user-select:none;user-select:none;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
 body.idle{background:var(--bg-idle)}body.ready{background:var(--bg-ready)}body.work{background:var(--bg-work)}body.rest{background:var(--bg-rest)}body.warmup{background:var(--bg-warmup)}body.cooldown{background:var(--bg-cooldown)}body.interval{background:var(--bg-interval)}body.paused{background:var(--bg-paused)}body.done{background:var(--bg-done)}
@@ -20,10 +21,13 @@ main{min-height:100%;display:flex;flex-direction:column;align-items:center;justi
 button{font:inherit;font-size:clamp(20px,6vw,30px);font-weight:650;min-width:38vw;max-width:300px;padding:.55em 1em;border-radius:16px;border:1px solid var(--btn-line);background:var(--btn-bg);color:var(--btn-fg);touch-action:manipulation}
 button#start{background:var(--start-bg);color:var(--start-fg);border-color:var(--start-bg)}button#start.pause{background:var(--pause-bg);color:var(--pause-fg);border-color:var(--pause-bg)}
 button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-color:var(--btn-line)}.toggle{color:var(--fg);font-size:clamp(15px,4.2vw,20px);display:flex;align-items:center;gap:8px;margin-top:1vh}.toggle input{width:24px;height:24px;accent-color:var(--accent)}
+#rsel{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:1vh}#rsel[hidden]{display:none}#rselLbl{color:var(--fg);font-size:clamp(16px,4.6vw,22px);font-weight:600}
+.rbtns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}.rbtns button{min-width:30vw;max-width:220px;background:var(--unsel-bg);color:var(--unsel-fg);border:3px solid var(--btn-line)}.rbtns button[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-fg);border-color:var(--sel-bg)}
 #status,#msg{font-size:clamp(12px,3.6vw,16px);color:var(--muted);min-height:1.2em}
 #nosleep{position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none}
 </style></head><body class="idle"><main>
 <div id="label">Timer</div><div id="phase"></div><div id="time">0:00</div><div id="sub"></div><div id="next"></div><div id="bar"><i></i></div>
+<div id="rsel" role="group" aria-labelledby="rselLbl" hidden><div id="rselLbl">Rounds</div><div class="rbtns" id="rbtns"></div></div>
 <div class="btns"><button id="start" type="button">Start</button><button id="reset" type="button">Reset</button><button id="skip" type="button" hidden>Skip</button></div>
 <label class="toggle"><input type="checkbox" id="awake" checked><span id="awakeLbl">Keep screen on</span></label>
 <div id="status"></div><div id="msg"></div></main>
@@ -38,10 +42,10 @@ button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-co
 var STRINGS={
  en:{start:"Start",pause:"Pause",resume:"Resume",reset:"Reset",skip:"Skip",ready:"Get ready",work:"Work",rest:"Rest",warmup:"Warm-up",cooldown:"Cool-down",interval:"",done:"Done!",next:"Next",round:"Round {r}/{n}",left:"{t} left",keepAwake:"Keep screen on",go:"Go",
   wlLock:"Screen stays on (wake lock)",wlVideo:"Screen stays on (video fallback)",wlOff:"Screen may turn off; audio cues are pre-scheduled",wlNone:"Keep-screen-on is not available here; leave the screen on for the most reliable cues",
-  audioOff:"Sound is off or blocked; tap Resume to re-enable",total:"Total {t}",tellChat:"Tell the chat you finished HIIT #{id} so it can be logged",badLink:"Bad timer link; using defaults"},
+  audioOff:"Sound is off or blocked; tap Resume to re-enable",total:"Total {t}",tellChat:"Tell the chat you finished HIIT #{id} so it can be logged",badLink:"Bad timer link; using defaults",rounds:"Rounds",roundsN:"{n} rounds"},
  zh:{start:"\u5f00\u59cb",pause:"\u6682\u505c",resume:"\u7ee7\u7eed",reset:"\u91cd\u7f6e",skip:"\u8df3\u8fc7",ready:"\u51c6\u5907",work:"\u8bad\u7ec3",rest:"\u4f11\u606f",warmup:"\u70ed\u8eab",cooldown:"\u653e\u677e",interval:"",done:"\u5b8c\u6210!",next:"\u4e0b\u4e00\u4e2a",round:"\u7b2c {r}/{n} \u8f6e",left:"\u5269\u4f59 {t}",keepAwake:"\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae",go:"\u5f00\u59cb",
   wlLock:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (wake lock)",wlVideo:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (video)",wlOff:"\u5c4f\u5e55\u53ef\u80fd\u5173\u95ed\uff1b\u63d0\u793a\u97f3\u5df2\u9884\u5148\u5b89\u6392",wlNone:"\u6b64\u5904\u65e0\u6cd5\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae\uff0c\u8bf7\u5c3d\u91cf\u4e0d\u8981\u9501\u5c4f",
-  audioOff:"\u58f0\u97f3\u88ab\u5173\u95ed\u6216\u963b\u6b62\uff0c\u8bf7\u70b9\u201c\u7ee7\u7eed\u201d\u91cd\u65b0\u542f\u7528",total:"\u603b\u8ba1 {t}",tellChat:"\u8bf7\u5728\u804a\u5929\u4e2d\u544a\u8bc9\u6211\u5df2\u5b8c\u6210 HIIT #{id}\uff0c\u4ee5\u4fbf\u8bb0\u5f55",badLink:"\u94fe\u63a5\u65e0\u6548\uff0c\u4f7f\u7528\u9ed8\u8ba4\u8bbe\u7f6e"}
+  audioOff:"\u58f0\u97f3\u88ab\u5173\u95ed\u6216\u963b\u6b62\uff0c\u8bf7\u70b9\u201c\u7ee7\u7eed\u201d\u91cd\u65b0\u542f\u7528",total:"\u603b\u8ba1 {t}",tellChat:"\u8bf7\u5728\u804a\u5929\u4e2d\u544a\u8bc9\u6211\u5df2\u5b8c\u6210 HIIT #{id}\uff0c\u4ee5\u4fbf\u8bb0\u5f55",badLink:"\u94fe\u63a5\u65e0\u6548\uff0c\u4f7f\u7528\u9ed8\u8ba4\u8bbe\u7f6e",rounds:"\u7ec4\u6570",roundsN:"{n} \u7ec4"}
 };
 var KINDS={work:1,rest:1,warmup:1,cooldown:1,interval:1};
 var DEF={label:"Timer",duration_s:60,ready_s:5,lang:"en",sound:true,speech:false,vibrate:true,keep_awake:true};
@@ -53,8 +57,8 @@ function bool(v,d){if(v===undefined||v===null||v==="")return d;if(typeof v==="bo
 function text(v){return v===undefined||v===null?"":String(v).slice(0,200)}
 var cfg={},msgs=[];
 function merge(src){if(!src||typeof src!=="object")return;for(var k in src)if(Object.prototype.hasOwnProperty.call(src,k))cfg[k]=src[k]}
-function fromParams(ps){var o={},map={label:"label",duration:"duration_s",duration_s:"duration_s",ready:"ready_s",ready_s:"ready_s",lang:"lang",sound:"sound",speech:"speech",vibrate:"vibrate",keep_awake:"keep_awake"};
- ps.forEach(function(v,k){if(map[k])o[map[k]]=v});if(o.duration_s!==undefined){o.duration_s=sec(o.duration_s);delete cfg.intervals;delete cfg.rounds;delete cfg.segments}if(o.ready_s!==undefined)o.ready_s=sec(o.ready_s);return o}
+function fromParams(ps){var o={},map={label:"label",duration:"duration_s",duration_s:"duration_s",ready:"ready_s",ready_s:"ready_s",lang:"lang",rounds:"rounds",sound:"sound",speech:"speech",vibrate:"vibrate",keep_awake:"keep_awake"};
+ ps.forEach(function(v,k){if(map[k])o[map[k]]=v});if(o.duration_s!==undefined){o.duration_s=sec(o.duration_s);delete cfg.intervals;delete cfg.rounds;delete cfg.segments}if(o.ready_s!==undefined)o.ready_s=sec(o.ready_s);if(o.rounds!==undefined)o.rounds=parseInt(o.rounds,10)||0;return o}
 function loadConfig(){merge(DEF);
  try{if(window.openai&&window.openai.toolOutput)merge(window.openai.toolOutput)}catch(e){}
  try{if(location.search.length>1)merge(fromParams(new URLSearchParams(location.search)))}catch(e){}
@@ -64,22 +68,28 @@ function loadConfig(){merge(DEF);
 }
 function buildIntervals(c){var out=[],i,r;
  function add(kind,s,label,round){s=sec(s);if(!(s>0))return;if(!KINDS[kind])kind="interval";out.push({kind:kind,seconds:Math.min(s,MAX_TOTAL),label:text(label),round:round||0})}
- if(Array.isArray(c.intervals)&&c.intervals.length){for(i=0;i<c.intervals.length;i++){var x=c.intervals[i]||{};add(x.kind||"interval",x.seconds,x.label||x.exercise,x.round|0)}}
- else if(c.rounds&&Array.isArray(c.segments)&&c.segments.length){var n=Math.max(1,Math.min(100,c.rounds|0)),sg=c.segments;
+ var hiit=Array.isArray(c.segments)&&c.segments.length&&(RO||c.rounds)&&(RO||!(Array.isArray(c.intervals)&&c.intervals.length));
+ if(!hiit&&Array.isArray(c.intervals)&&c.intervals.length){for(i=0;i<c.intervals.length;i++){var x=c.intervals[i]||{};add(x.kind||"interval",x.seconds,x.label||x.exercise,x.round|0)}}
+ else if(hiit){var n=Math.max(1,Math.min(100,RO?selRounds:c.rounds|0)),sg=c.segments;
   if(sec(c.warmup_s)>0)add("warmup",c.warmup_s,"",0);
   for(r=1;r<=n;r++)for(i=0;i<sg.length;i++){var g=sg[i]||{};if(r===n&&i===sg.length-1&&g.kind==="rest")continue;add(g.kind==="rest"?"rest":"work",g.seconds,g.exercise||g.label,r)}
   if(sec(c.cooldown_s)>0)add("cooldown",c.cooldown_s,"",n)}
  if(!out.length)add("interval",sec(c.duration_s)>0?c.duration_s:DEF.duration_s,"",0);
  out=out.slice(0,MAX_INTERVALS);var tot=0;out=out.filter(function(x){tot+=x.seconds;return tot<=MAX_TOTAL||x===out[0]});return out}
 loadConfig();
+/* Optional round selector (work/rest rounds mode): round_options like [10,20]; cfg.rounds picks the default. */
+var RO=(function(o){if(!Array.isArray(o)||!Array.isArray(cfg.segments)||!cfg.segments.length)return null;var v=[];
+ o.forEach(function(x){x=x|0;if(x>=1&&x<=100&&v.indexOf(x)<0)v.push(x)});v.sort(function(a,b){return a-b});return v.length>=2?v:null})(cfg.round_options);
+var selRounds=RO?(RO.indexOf(cfg.rounds|0)>=0?cfg.rounds|0:RO[0]):0;
 var LANG=Object.prototype.hasOwnProperty.call(STRINGS,cfg.lang)?cfg.lang:"en",L=STRINGS[LANG];
 function t(key,vars){var s=L[key]||"";if(vars)for(var v in vars)s=s.split("{"+v+"}").join(vars[v]);return s}
 var label=text(cfg.label||cfg.name)||"Timer",ready=sec(cfg.ready_s);ready=ready>=0?Math.min(ready,60):DEF.ready_s;
 var SOUND=bool(cfg.sound,true),SPEECH=bool(cfg.speech,false),VIBE=bool(cfg.vibrate,true);
-var intervals=buildIntervals(cfg),rounds=(cfg.rounds|0)||intervals.reduce(function(a,x){return Math.max(a,x.round)},0);
-/* Timeline: optional ready segment followed by the intervals. */
-var segs=[],T=0;if(ready>0){segs.push({kind:"ready",seconds:ready,label:"",round:0,ready:true})}
-intervals.forEach(function(x){segs.push(x)});segs.forEach(function(s){s.start=T;T+=s.seconds;s.end=T});
+var intervals,rounds,segs,T,cues;
+/* Timeline: optional ready segment followed by the intervals. Rebuilt (with its cues) when the round count changes. */
+function rebuild(){intervals=buildIntervals(cfg);rounds=RO?selRounds:((cfg.rounds|0)||intervals.reduce(function(a,x){return Math.max(a,x.round)},0));
+ segs=[];T=0;if(ready>0){segs.push({kind:"ready",seconds:ready,label:"",round:0,ready:true})}
+ intervals.forEach(function(x){segs.push(x)});segs.forEach(function(s){s.start=T;T+=s.seconds;s.end=T});cues=buildCues(segs)}
 /* cue-schedule:begin (pure; also exercised by test_render_timer_html.py)
    Every time counting starts (end of the ready period, each interval change) and at the finish, play
    short, short, long: shorts 2 s and 1 s before the boundary, the long beep starting exactly on 0.
@@ -92,7 +102,7 @@ function buildCues(segs){var cues=[],i,j;
   cues.push({t:s.end,type:"long",tone:tone,event:ev,seg:i+1})}
  return cues}
 /* cue-schedule:end */
-var cues=buildCues(segs);
+rebuild();
 /* ---------- state (timestamp based: correct after throttling or suspension) ---------- */
 var started=false,running=false,finished=false,acc=0,t0=0,lastSeg=-1,lastCue=-1;
 function now(){return Date.now()}
@@ -156,7 +166,11 @@ function draw(){var e=elapsed(),i=segAt(e),s=segs[i],b=document.body;
   var nx=started?segs[i+1]:null;$("next").textContent=nx?t("next")+": "+(phaseText(nx)||"")+" "+fmt(nx.seconds):""}
  $("bar").firstChild.style.width=(T?100*e/T:0)+"%";
  var st=$("start");st.textContent=running?t("pause"):(started&&!finished?t("resume"):t("start"));st.className=running?"pause":"";
- $("skip").hidden=intervals.length<2;$("skip").disabled=!started||finished}
+ $("skip").hidden=intervals.length<2;$("skip").disabled=!started||finished;drawRounds()}
+function drawRounds(){var box=$("rsel");if(!RO){box.hidden=true;return}box.hidden=started;$("rselLbl").textContent=t("rounds");
+ var bs=$("rbtns").children;for(var i=0;i<bs.length;i++){bs[i].setAttribute("aria-pressed",String(RO[i]===selRounds));bs[i].disabled=started}}
+function pickRounds(n){if(started||!RO||RO.indexOf(n)<0)return;selRounds=n;rebuild();lastSeg=-1;lastCue=-1;draw()}
+if(RO)RO.forEach(function(n){var b=document.createElement("button");b.type="button";b.textContent=t("roundsN",{n:n});b.onclick=function(){pickRounds(n)};$("rbtns").appendChild(b)});
 function onTransitions(e){var i=segAt(e),fresh;
  for(var c=lastCue+1;c<cues.length&&cues[c].t<=e+1e-6;c++){fresh=e-cues[c].t<1.5;var q=cues[c];
   if(fresh){if(q.type==="short")say(q.n);else if(q.event==="begin"){say(t("go"));vibe(200)}else if(q.event==="next"){say(phaseText(segs[q.seg]));vibe(200)}else if(q.event==="finish"){say(t("done"));vibe([300,100,300,100,600])}}
@@ -178,6 +192,6 @@ window.addEventListener("pageshow",tick);window.addEventListener("focus",tick);
 document.title=label;document.documentElement.lang=LANG;$("start").textContent=t("start");$("reset").textContent=t("reset");$("skip").textContent=t("skip");$("awakeLbl").textContent=t("keepAwake");
 if(msgs.length)$("msg").textContent=t(msgs[0]);
 setInterval(tick,200);draw();
-window.__timer={segs:segs,cues:cues,total:T,cfg:cfg,labels:L,state:function(){return{started:started,running:running,finished:finished,elapsed:elapsed(),seg:segAt(elapsed()),awake:awakeMode,audio:ac&&ac.state,scheduled:nodes.length}}};
+window.__timer={get segs(){return segs},get cues(){return cues},get total(){return T},get rounds(){return rounds},roundOptions:RO,pick:pickRounds,cfg:cfg,labels:L,state:function(){return{started:started,running:running,finished:finished,elapsed:elapsed(),seg:segAt(elapsed()),awake:awakeMode,audio:ac&&ac.state,scheduled:nodes.length}}};
 })();
 </script></body></html>
