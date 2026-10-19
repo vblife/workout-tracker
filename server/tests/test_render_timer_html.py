@@ -302,6 +302,10 @@ class TimerThemeTest(unittest.TestCase):
         ratios["start"] = contrast(p["start-fg"], p["start-bg"])
         ratios["pause"] = contrast(p["pause-fg"], p["pause-bg"])
         ratios["disabled"] = contrast(p["disabled-fg"], p["disabled-bg"])
+        ratios["round selected"] = contrast(p["sel-fg"], p["sel-bg"])
+        ratios["round unselected"] = contrast(p["unsel-fg"], p["unsel-bg"])
+        # The selected round toggle must stand out from the unselected one (non-text, 3:1).
+        self.assertGreaterEqual(contrast(p["sel-bg"], p["unsel-bg"]), 3.0)
         for name, ratio in ratios.items():
             self.assertGreaterEqual(ratio, 4.5, f"{name}: {ratio:.2f}")
         # Progress bar: track visible on every background, fill visible on the track (WCAG 1.4.11, 3:1).
@@ -356,6 +360,127 @@ class TimerSoundTest(unittest.TestCase):
         # A 2 s ready period only has room for one short beep before the long one.
         self.assertEqual(self._cues([{"kind": "ready", "ready": True, "seconds": 2}, {"kind": "interval", "seconds": 1}]), [
             (1, "short", "main", "begin"), (2, "long", "main", "begin"), (3, "long", "main", "finish")])
+
+
+class TimerRoundSelectorTest(unittest.TestCase):
+    SCRIPT = os.path.join(os.path.dirname(r.__file__), "render_timer_html.py")
+    HIIT = {"label": "HIIT 40/20", "segments": [{"kind": "work", "seconds": 40}, {"kind": "rest", "seconds": 20}],
+            "warmup_s": 0, "cooldown_s": 0}
+
+    def test_config_with_round_options(self):
+        cfg = r.normalize_config({**self.HIIT, "round_options": [20, 10], "rounds": 10})
+        self.assertEqual(cfg["round_options"], [10, 20])
+        self.assertEqual(cfg["rounds"], 10)
+        self.assertEqual(cfg["round_totals"], {"10": 580, "20": 1180})  # n*40 + (n-1)*20, final rest skipped
+        self.assertEqual(cfg["total_s"], 580)
+        self.assertEqual([x["kind"] for x in cfg["intervals"]][-2:], ["rest", "work"])
+        self.assertEqual(len(cfg["intervals"]), 19)
+        self.assertEqual(cfg["segments"], [{"kind": "work", "seconds": 40, "label": None},
+                                           {"kind": "rest", "seconds": 20, "label": None}])
+        for n in (10, 20):
+            self.assertEqual(cfg["round_totals"][str(n)],
+                             core.hiit_config(rounds=n, warmup_s=0, cooldown_s=0, segments=self.HIIT["segments"])["planned_seconds"])
+        # Default falls back to the first (smallest) option.
+        self.assertEqual(r.normalize_config({**self.HIIT, "round_options": [20, 10]})["rounds"], 10)
+        self.assertNotIn("round_options", r.normalize_config({**self.HIIT, "rounds": 10}))
+
+    def test_round_options_validation(self):
+        bad = [
+            {**self.HIIT, "round_options": [10, 20], "rounds": 15},
+            {**self.HIIT, "round_options": [10]},
+            {**self.HIIT, "round_options": [10, 10]},
+            {**self.HIIT, "round_options": [0, 10]},
+            {**self.HIIT, "round_options": [10, 101]},
+            {**self.HIIT, "round_options": [10, True]},
+            {**self.HIIT, "round_options": "10,20"},
+            {**self.HIIT, "round_options": [1, 2, 3, 4, 5, 6, 7]},
+            {"duration_s": 60, "round_options": [10, 20]},
+            {"intervals": [{"kind": "work", "seconds": 5}], "segments": self.HIIT["segments"], "round_options": [10, 20]},
+        ]
+        for cfg in bad:
+            with self.assertRaises(ValueError, msg=cfg):
+                r.normalize_config(cfg)
+
+    def test_template_has_selector_wired_to_rebuild(self):
+        html = template()
+        self.assertIn('<div id="rsel" role="group" aria-labelledby="rselLbl" hidden>', html)
+        self.assertIn("function rebuild(){", html)
+        self.assertIn("cues=buildCues(segs)}", html)  # cues are rebuilt for the chosen count
+        self.assertIn("function pickRounds(n){if(started||", html)  # locked after Start
+        self.assertIn("box.hidden=started", html)  # hidden while running, back after Reset
+        self.assertIn('rounds:"rounds"', html)  # #rounds=20 / ?rounds=20 preselect
+        self.assertEqual((ui_tables()["en"]["rounds"], ui_tables()["en"]["roundsN"]), ("Rounds", "{n} rounds"))
+        self.assertEqual((ui_tables()["zh"]["rounds"], ui_tables()["zh"]["roundsN"]), ("组数", "{n} 组"))
+
+    def test_placeholders_match_between_locales(self):
+        tables = ui_tables()
+        for key, text in tables["en"].items():
+            self.assertEqual(set(re.findall(r"\{\w+\}", text)), set(re.findall(r"\{\w+\}", tables["zh"][key])), key)
+
+    def run_cli(self, *args):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "t.html")
+            res = subprocess.run([sys.executable, self.SCRIPT, out, *args], capture_output=True, text=True)
+            data = None
+            if os.path.exists(out):
+                with open(out, encoding="utf-8") as f:
+                    data = json.loads(injected(f.read()))
+            return res, data
+
+    def test_cli_rounds_list_and_fixed(self):
+        res, data = self.run_cli("--work", "40", "--rest", "20", "--rounds", "10,20", "--label", "HIIT 40/20")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual((data["round_options"], data["rounds"], data["round_totals"]), ([10, 20], 10, {"10": 580, "20": 1180}))
+        res, data = self.run_cli("--work", "40", "--rest", "20", "--rounds", "10,20", "--default-rounds", "20")
+        self.assertEqual((data["rounds"], data["total_s"]), (20, 1180))
+        res, data = self.run_cli("--work", "0:40", "--rest", "20", "--rounds", "10")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertNotIn("round_options", data)
+        self.assertEqual((data["rounds"], data["total_s"]), (10, 580))
+        res, data = self.run_cli("--work", "30", "--rounds", "5")  # no rest
+        self.assertEqual((data["total_s"], len(data["intervals"])), (150, 5))
+
+    def test_cli_rounds_errors_are_one_line_usage_errors(self):
+        cases = [
+            (["--work", "40", "--rounds", "10,x"], "comma list"),
+            (["--work", "40", "--rounds", "10,10"], "repeat"),
+            (["--work", "40", "--rounds", "0,20"], "1-100"),
+            (["--work", "-5", "--rounds", "10"], "--work"),
+            (["--work", "40", "--rest", "0", "--rounds", "10"], "--rest"),
+            (["--rounds", "10,20"], "needs both --work and --rounds"),
+            (["--work", "40"], "needs both --work and --rounds"),
+            (["--work", "40", "--rounds", "10,20", "--default-rounds", "15"], "must be one of"),
+            (["--work", "40", "--rounds", "10", "--default-rounds", "10"], "needs a --rounds list"),
+            (["--work", "40", "--rounds", "10,20", "--duration", "60"], "cannot be combined"),
+        ]
+        for args, needle in cases:
+            res, data = self.run_cli(*args)
+            self.assertEqual(res.returncode, 2, args)
+            self.assertIsNone(data, args)
+            self.assertNotIn("Traceback", res.stderr, args)
+            errors = [x for x in res.stderr.splitlines() if "error:" in x]
+            self.assertEqual(len(errors), 1, res.stderr)
+            self.assertIn(needle, errors[0], args)
+
+    def test_cue_schedule_for_each_round_option(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        html = template()
+        code = html[html.index("/* cue-schedule:begin"):html.index("/* cue-schedule:end */")]
+        for n in (10, 20):
+            cfg = r.normalize_config({**self.HIIT, "round_options": [10, 20], "rounds": n})
+            segs, t = [{"kind": "ready", "ready": True, "seconds": 5}] + cfg["intervals"], 0
+            for x in segs:
+                x["start"], t = t, t + x["seconds"]
+                x["end"] = t
+            script = code + "\nprocess.stdout.write(JSON.stringify(buildCues(" + json.dumps(segs) + ")));"
+            cues = json.loads(subprocess.run([node, "-e", script], check=True, capture_output=True, text=True).stdout)
+            self.assertEqual(len(cues), 3 * (2 * n))  # ready + n work + (n-1) rest, three beeps each
+            longs = [c for c in cues if c["type"] == "long"]
+            self.assertEqual([c["t"] for c in longs][0], 5)
+            self.assertEqual(longs[-1], {"t": 5 + cfg["total_s"], "type": "long", "tone": "main", "event": "finish", "seg": 2 * n})
+            self.assertEqual(sum(1 for c in longs if c["tone"] == "rest"), n - 1)
 
 
 if __name__ == "__main__":
