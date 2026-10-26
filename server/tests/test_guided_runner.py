@@ -266,6 +266,16 @@ class GuidedRendererTest(unittest.TestCase):
         zh = r.render({**GUIDED, "lang": "zh"}, template())
         self.assertEqual(injected(zh)["lang"], "zh")
 
+    def test_guided_buttons_share_the_timer_button_size(self):
+        # The guided Done button reuses the shared button size (same as Start/Reset and the HIIT timer);
+        # only its colors differ, so it does not dwarf the other controls.
+        html = template()
+        rule = re.search(r"button#doneBtn\{([^}]*)\}", html).group(1)
+        for prop in ("font-size", "min-width", "max-width", "padding"):
+            self.assertNotIn(prop, rule)
+        start = re.search(r"button#start\{([^}]*)\}", html).group(1)
+        self.assertNotIn("font-size", start)
+
     def test_cache_ignores_per_run_ids(self):
         with tempfile.TemporaryDirectory() as tmp:
             a = r.normalize_config(GUIDED)

@@ -52,9 +52,8 @@ class TimerTemplateTest(unittest.TestCase):
 
     def test_template_has_screen_off_safeguards(self):
         html = template()
-        for needle in ("navigator.wakeLock", "visibilitychange", "AudioContext", "navigator.mediaSession",
-                       "MediaMetadata", "navigator.vibrate", "data:video/mp4;base64,", "data:video/webm;base64,",
-                       "audio/wav", "Date.now()", "playsinline", 'id="awake"'):
+        for needle in ("navigator.wakeLock", "visibilitychange", "AudioContext", "navigator.vibrate",
+                       "data:video/mp4;base64,", "data:video/webm;base64,", "Date.now()", "playsinline", 'id="awake"'):
             self.assertIn(needle, html)
         self.assertNotIn("setInterval(function(){left--", html)
 
@@ -551,17 +550,20 @@ class TimerTickTest(unittest.TestCase):
         self.assertLess(max(abs(x) for x in data[480:]), 0.05)  # 2.5 ms decay constant: under 5% after 10 ms
         self.assertEqual(data[-1], 0)
 
-    def test_keep_alive_audio_is_truly_silent(self):
-        data = _node_eval("/* keep-alive:begin", "/* keep-alive:end */", "Array.from(new Uint8Array(silentWav(8000,10)))")
-        header, samples = bytes(data[:44]), data[44:]
-        self.assertEqual(header[:4] + header[8:16], b"RIFFWAVEfmt ")
-        self.assertEqual(len(samples), 80000)
-        self.assertEqual(set(samples), {128})  # 8-bit unsigned midpoint = zero amplitude, no click train
+    def test_audio_never_registers_a_media_session(self):
+        # Sound is Web Audio only. An <audio> element, MediaMetadata, media action handlers or audioSession
+        # "playback" make iOS/Android show a Now Playing / media card on Start and pause other apps' audio.
         html = template()
+        self.assertNotRegex(html, r"(?i)<audio\b|new Audio\(|createElement\([\"']audio")
+        self.assertNotIn("MediaMetadata", html)
+        self.assertNotIn("audio/wav", html)
+        self.assertNotRegex(html, r'audioSession\.type\s*=\s*"playback"')
+        self.assertIn('navigator.audioSession.type="ambient"', html)
+        self.assertEqual(re.findall(r"setActionHandler\(([^)]*)\)", html), ["a,null"])  # only ever cleared
+        self.assertEqual(html.count("quietMedia();"), 3)  # countdown resume, guided begin and guided resume
         self.assertEqual(html.count("createOscillator"), 1)  # only the cue tone(); no hidden hum oscillator
         self.assertIn("createBuffer(1,1,22050)", html)  # the unlock buffer is one zero sample
-        self.assertNotIn("%400", html)
-        self.assertEqual(html.count('<video id="nosleep" muted'), 1)
+        self.assertEqual(html.count('<video id="nosleep" muted'), 1)  # muted, no audio track: no media card
 
     def test_cli_no_tick(self):
         with tempfile.TemporaryDirectory() as tmp:
