@@ -293,10 +293,17 @@ def touch(c, session_id, at):
     c.execute("UPDATE sessions SET last_activity_at=? WHERE id=? AND status='in_progress'", (_iso(_dt(at)), session_id))
 
 
-def finish_workout(c, at=None):
+def finish_workout(c, at=None, session_id=None):
+    """Finish the active workout. With session_id, finish it only if it is that workout: when another workout
+    (or none) is active, the requested one already ended (e.g. closed after 15 minutes idle), so report it as
+    already finished and leave whatever is active untouched."""
+    if session_id is not None and (isinstance(session_id, bool) or not isinstance(session_id, int) or session_id < 1):
+        raise _error("session_id must be a positive integer")
     at = _dt(at)
     reconcile_active(c, at)
     row = c.execute("SELECT id,last_activity_at FROM sessions WHERE status='in_progress'").fetchone()
+    if session_id is not None and (not row or row["id"] != session_id):
+        return _already_finished(c, session_id, row["id"] if row else None)
     if not row:
         raise _error("no active workout")
     ended = _dt(row["last_activity_at"] or at) if _has_work(c, row["id"]) else at
@@ -306,6 +313,16 @@ def finish_workout(c, at=None):
     from calories import estimate_session
     estimate_session(c, row["id"])
     return {"status": "completed", **_session(c, row["id"])}
+
+
+def _already_finished(c, session_id, active_id):
+    workout = _session(c, session_id)
+    note = (f"Workout #{session_id} is not the active workout; it had already ended"
+            + (f" ({workout['status']})" if workout else " (not found)") + ", so nothing was changed"
+            + (f"; workout #{active_id} is still active." if active_id is not None else "."))
+    return {"status": "already_finished", "session_id": session_id,
+            "session_status": workout["status"] if workout else None,
+            "active_session_id": active_id, "note": note, "workout": workout}
 
 
 def abandon_workout(c, at=None):

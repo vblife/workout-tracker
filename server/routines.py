@@ -323,7 +323,7 @@ COMPLETION_HANDOFF = {
     "timing": "Log the completed sets in order, one log_sets call per set with performed_at set to that set's "
               "done_at, before any other workout tool call. The active workout closes after 15 minutes without "
               "logged activity, so backdating each set to when it was done keeps the sets in this workout.",
-    "after_logging": "Call finish_workout when the user is done for the day.",
+    "after_logging": "Call finish_workout with this session_id when the user is done for the day.",
 }
 
 
