@@ -297,16 +297,17 @@ function gCues(len,nextKind){var cues=[],ticks=[],tone=nextKind==="rest"?"rest":
 /* guided-core:end */
 /* guided-log:begin (pure; also exercised by test_guided_runner.py)
    MCP Apps auto-log. gLogCall turns one Done entry into the tool call that records it: log_sets for one set
-   with performed_at = done_at, or set_workout_item_status completed for a loggable:false (activity-only)
+   with performed_at = done_at (and the runner's session_id, so a set is rejected rather than saved into an
+   unrelated workout when the runner's workout already ended), or set_workout_item_status completed for a loggable:false (activity-only)
    step with a session item. gLogger runs those calls one at a time, in order, at most once per step (or
    per item for status calls), and finish() waits for them, retries failed calls once (never a timed-out
    one, which may have been saved), then calls finish_workout only if every Done entry was recorded, passing
    hooks.session_id so an unrelated workout that became active meanwhile is never finished. */
-function gLogCall(e){if(!e||typeof e!=="object")return null;
+function gLogCall(e,sid){if(!e||typeof e!=="object")return null;
  if(e.loggable===false)return e.session_item_id?{name:"set_workout_item_status",arguments:{item_id:e.session_item_id,status:"completed"}}:null;
  var s={exercise:e.exercise};if(e.reps)s.reps=e.reps;if(e.weight!==null&&e.weight!==undefined){s.weight=e.weight;if(e.unit)s.unit=e.unit}
  if(e.duration_s)s.duration_s=e.duration_s;if(e.distance_m!==null&&e.distance_m!==undefined)s.distance_m=e.distance_m;s.is_warmup=!!e.is_warmup;
- if(e.session_item_id)s.session_item_id=e.session_item_id;var a={sets:[s]};if(e.done_at)a.performed_at=e.done_at;return{name:"log_sets",arguments:a}}
+ if(e.session_item_id)s.session_item_id=e.session_item_id;var a={sets:[s]};if(e.done_at)a.performed_at=e.done_at;if(sid)a.session_id=sid;return{name:"log_sets",arguments:a}}
 function gKey(e,c){return c&&c.name==="set_workout_item_status"?"item:"+c.arguments.item_id:"step:"+e.step}
 function gText(r){var c=r&&Array.isArray(r.content)?r.content[0]:null;return c&&typeof c.text==="string"?c.text:""}
 /* A call succeeded: no isError, and log_sets really saved (status logged, not needs_confirmation). An
@@ -315,7 +316,7 @@ function gToolOk(name,r){if(!r||typeof r!=="object")return false;var txt=gText(r
  if(name==="finish_workout"&&r.isError)return/no active workout/.test(txt);if(r.isError)return false;
  if(name==="log_sets")return sc&&typeof sc==="object"?sc.status==="logged":!/^(Nothing saved|Error)/.test(txt);return true}
 function gLogger(call,ok,hooks){hooks=hooks||{};var q=[],seen={},busy=false,done=[],failed=[],waiters=[],fin=null,finished=false;
- function add(e){var c=gLogCall(e),k=gKey(e,c);if(!c||seen[k])return false;seen[k]=1;q.push({step:e.step,key:k,call:c,tries:0,unknown:false});pump();return true}
+ function add(e){var c=gLogCall(e,hooks.session_id),k=gKey(e,c);if(!c||seen[k])return false;seen[k]=1;q.push({step:e.step,key:k,call:c,tries:0,unknown:false});pump();return true}
  function pump(){if(busy)return;var j=q.shift();if(!j){waiters.splice(0).forEach(function(f){f()});return}busy=true;j.tries++;
   Promise.resolve().then(function(){return call(j.call.name,j.call.arguments)}).then(function(r){return ok(j.call.name,r)},function(err){j.unknown=!!(err&&err.message==="timeout");return false})
    .then(function(good){busy=false;if(good){done.push(j);if(hooks.logged)hooks.logged(j)}else{failed.push(j);if(hooks.failed)hooks.failed(j)}pump()})}

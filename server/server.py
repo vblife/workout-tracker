@@ -41,8 +41,8 @@ TOOLS=[
   "inputSchema":O({"canonical":{"type":"string"},"category":{"type":"string","enum":["strength","cardio","hiit","mobility","hike"]},"name_zh":{"type":"string"},
     "muscle_groups":{"type":"array","items":{"type":"string"}},"equipment":{"type":"string"},"is_bodyweight":{"type":"boolean"},
     "tracking":{"type":"string","enum":["reps_weight","reps","duration","distance"]},"aliases":{"type":"array","items":{"type":"string"}}},["canonical","category"])},
- {"name":"log_sets","title":"Log sets","description":"Store one or more sets parsed from the user's message. Atomic: if any exercise is unknown/ambiguous nothing is saved and status=needs_confirmation with candidates. A first log starts a workout; more than 15 minutes of inactivity closes it. Returns e1RM (Epley) and PR flags.",
-  "inputSchema":O({"sets":{"type":"array","items":SET_ITEM,"minItems":1},"performed_at":{"type":"string","description":"ISO time; a value with no offset is user-local (settings.timezone). Default now"},"notes":{"type":"string"},
+ {"name":"log_sets","title":"Log sets","description":"Store one or more sets parsed from the user's message. Atomic: if any exercise is unknown/ambiguous nothing is saved and status=needs_confirmation with candidates. A first log starts a workout; more than 15 minutes of inactivity closes it. Returns e1RM (Epley) and PR flags. Optional session_id: log only into that workout; if it is not the active one (completed, abandoned, missing, or another workout is active) nothing is saved, no workout is started, and the result has status rejected with reason and note. Without session_id, logs into whatever workout is active.",
+  "inputSchema":O({"sets":{"type":"array","items":SET_ITEM,"minItems":1},"session_id":{"type":"integer","minimum":1,"description":"Workout these sets belong to (the guided runner passes its own); reject instead of logging elsewhere"},"performed_at":{"type":"string","description":"ISO time; a value with no offset is user-local (settings.timezone). Default now"},"notes":{"type":"string"},
     "session_weight":{"type":"number","exclusiveMinimum":0},"weight_unit":{"type":"string","enum":["lb","kg"]},"planned_duration_min":{"type":"number","exclusiveMinimum":0}},["sets"]),"_meta":APP_TOOL},
  {"name":"list_recent","title":"List recent sets","description":"Most recent sets, newest first (set_id usable with delete_set).",
   "inputSchema":O({"limit":{"type":"integer","minimum":1,"maximum":100,"default":10},"exercise":{"type":"string"}}),"annotations":{"readOnlyHint":True}},
@@ -153,6 +153,7 @@ RESOURCES=[{"uri":HIIT_URI,"name":"hiit_timer_view","title":"HIIT Timer","descri
 
 def _summary(name,r,ui=False):
   if name=="log_sets":
+    if r["status"]=="rejected": return r["note"]
     if r["status"]!="logged": return "Nothing saved — needs confirmation: "+json.dumps(r["problems"],ensure_ascii=False)
     return "Logged: "+"; ".join(f"{x['exercise']} {x['reps'] or ''}{' reps' if x['reps'] else ''}{(' @ '+str(x['weight'])+x['unit']) if x['weight'] is not None else ''}{' (PR!)' if x['is_pr'] else ''}" for x in r["logged"])
   if name=="hiit_timer":
@@ -170,7 +171,7 @@ def call_tool(c,name,a):
   if name=="resolve_exercise": return core.resolve_exercise(c,a.get("names") or [])
   if name=="add_alias": return core.add_alias(c,**a)
   if name=="add_exercise": return core.add_exercise(c,**a)
-  if name=="log_sets": return core.log_sets(c,a.get("sets"),a.get("performed_at"),a.get("notes"))
+  if name=="log_sets": return core.log_sets(c,a.get("sets"),a.get("performed_at"),a.get("notes"),session_id=a.get("session_id"))
   if name=="list_recent": return core.list_recent(c,**a)
   if name=="delete_set": return core.delete_set(c,a.get("set_id"))
   if name=="update_set": return core.update_set(c,**a)

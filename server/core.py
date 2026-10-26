@@ -148,15 +148,21 @@ def add_exercise(c,canonical,category,name_zh=None,muscle_groups=None,equipment=
 def epley(kg,reps):
   if not kg or not reps or reps<1: return None
   return kg if reps==1 else kg*(1+reps/30)
-def _session_for(c,t,typ,session_weight_kg=None,planned_duration_min=None):
-  return workouts.session_for_log(c,t,typ,session_weight_kg,planned_duration_min)
-def log_sets(c,sets,performed_at=None,notes=None,session_weight=None,weight_unit="kg",planned_duration_min=None):
+def _session_for(c,t,typ,session_weight_kg=None,planned_duration_min=None,session_id=None):
+  return workouts.session_for_log(c,t,typ,session_weight_kg,planned_duration_min,session_id)
+def log_sets(c,sets,performed_at=None,notes=None,session_weight=None,weight_unit="kg",planned_duration_min=None,session_id=None):
+  """Log sets into the active workout (starting one if none). With session_id, log only into that workout: if it
+  is not the active one (already completed/abandoned, missing, or another workout is active) nothing is saved and
+  the result is status=rejected with reason and note; the sets never go to another workout."""
   if not sets: raise UserError("sets must be a non-empty list")
   if session_weight is not None and (not isinstance(session_weight,(int,float)) or isinstance(session_weight,bool) or session_weight<=0): raise UserError("session_weight must be > 0")
   if weight_unit not in("lb","kg"): raise UserError("weight_unit must be lb or kg")
   if planned_duration_min is not None and (not isinstance(planned_duration_min,(int,float)) or planned_duration_min<=0): raise UserError("planned_duration_min must be > 0")
   session_weight_kg=None if session_weight is None else float(session_weight)*(LB if weight_unit=="lb" else 1)
   tz=user_timezone(c); t0=_parse_time(performed_at,tz); unit_default=display_unit(c)
+  if session_id is not None:
+    rejected=workouts.log_target_rejection(c,session_id,t0)
+    if rejected: return rejected
   resolved,problems=[],[]
   for i,s in enumerate(sets):
     if not isinstance(s,dict) or not s.get("exercise"): problems.append({"index":i,"error":"missing exercise"}); continue
@@ -179,7 +185,7 @@ def log_sets(c,sets,performed_at=None,notes=None,session_weight=None,weight_unit
   typ={r["category"] for _,r in resolved}; typ=typ.pop() if len(typ)==1 else "mixed"
   out=[]; now=dbm.now()
   with dbm.transaction(c):
-   sid,new=_session_for(c,t0,typ,session_weight_kg,planned_duration_min)
+   sid,new=_session_for(c,t0,typ,session_weight_kg,planned_duration_min,session_id)
    if notes: c.execute("UPDATE sessions SET notes=trim(coalesce(notes,'')||' '||?) WHERE id=?",(notes,sid))
    for s,r in resolved:
     unit=s.get("unit") or unit_default; w=s.get("weight")
