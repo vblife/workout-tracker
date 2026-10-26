@@ -99,7 +99,11 @@ preview that starts no workout (`--default-rest SECONDS` changes the 90 s defaul
   already saved (same exercise, item and time), and finishes the workout. Because an offline run logs nothing
   until the end, the 15-minute idle rule has usually closed the workout (abandoned, items skipped) by then;
   `log_guided_result` reopens that routine workout for the sets and finishes it again, unless another workout
-  is active (`rejected`, nothing saved). `render_timer_html.py` refuses a config with `ui_auto_log: true`, so an
+  is active (`rejected`, `other_workout_active`, nothing saved). Only a close by the idle rule is reopened
+  (`sessions.closed_by_inactivity`): a workout finished or abandoned on purpose is never reopened by a late or
+  replayed result (`rejected`, `session_closed`). On reopen only the items the idle close skipped
+  (`workout_session_items.skipped_by_inactivity`) go back to pending; items the user skipped stay skipped.
+  Each `done_at` is pinned to `[started_at, now]`, so a clock-skewed future time is saved as now. `render_timer_html.py` refuses a config with `ui_auto_log: true`, so an
   auto-logging run never drops to the offline page.
 - **Logging (MCP Apps, primary).** When the client negotiates the `io.modelcontextprotocol/ui` extension,
   `guided_routine_timer` carries `_meta.ui.resourceUri = ui://workout/guided.html`, which serves this same

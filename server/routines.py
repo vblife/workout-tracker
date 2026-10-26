@@ -317,7 +317,7 @@ COMPLETION_HANDOFF = {
     "rule": "When a message carries that result, immediately call log_guided_result with its session_id, completed "
             "and ended. Do not ask questions first, do not call log_sets set by set, and do not call finish_workout: "
             "log_guided_result backdates each Done set to its done_at, skips sets already saved, reopens the "
-            "runner's workout if it closed while the user trained offline, and finishes it. Never log skipped, "
+            "runner's workout if the 15-minute idle rule closed it while the user trained offline, and finishes it. Never log skipped, "
             "unreached, or prescribed-only steps.",
     "without_result": "If the user says they are done but did not send the result, ask them to tap Send to Workout "
                       "Bot on the finished page (reopening the page shows it again). If they cannot, ask where they "
@@ -326,8 +326,9 @@ COMPLETION_HANDOFF = {
                     "log_guided_result marks their session item completed.",
     "timing": "log_guided_result logs each set with performed_at set to its done_at, in done_at order, so the sets "
               "land in this workout even though the active workout closes after 15 minutes without logged activity.",
-    "on_rejected": "status rejected means another workout is active now; nothing was saved. Ask the user which "
-                   "workout the sets belong to. needs_confirmation means an exercise is unknown; nothing was saved.",
+    "on_rejected": "status rejected means nothing was saved: another workout is active now (other_workout_active), "
+                   "or the runner's workout was already finished or abandoned on purpose (session_closed). Ask the "
+                   "user which workout the sets belong to. needs_confirmation means an exercise is unknown; nothing was saved.",
 }
 
 
@@ -404,9 +405,12 @@ def log_guided_result(c, session_id, completed, ended="finished", finish=True):
     entry becomes one set backdated to its done_at, in done_at order. Idempotent: a set already saved for the
     same exercise, session item and time is skipped, so sending the same result twice logs nothing new. The
     workout may already have been closed by the 15-minute inactivity rule while the user trained offline (an
-    offline run logs nothing until the end); it is then reopened for these sets and finished again, unless
-    another workout is active, in which case nothing is saved. Unknown exercises save nothing
-    (needs_confirmation). Entries with loggable false mark their session item completed instead."""
+    offline run logs nothing until the end); only such an idle-closed workout is reopened for these sets and
+    finished again, with only the items that idle close skipped set back to pending (the user's own skips stay
+    skipped). Nothing is saved when another workout is active, or when the workout was finished or abandoned
+    deliberately (a stale replay must not reopen it). A done_at before the workout started or after now (clock
+    skew) is pinned to that bound. Unknown exercises save nothing (needs_confirmation). Entries with loggable
+    false mark their session item completed instead."""
     import core
     if isinstance(session_id, bool) or not isinstance(session_id, int) or session_id < 1:
         raise _error("session_id must be a positive integer")
@@ -446,9 +450,11 @@ def log_guided_result(c, session_id, completed, ended="finished", finish=True):
         return {"status": "needs_confirmation", "session_id": session_id, "logged": [], "problems": problems,
                 "note": "Nothing was saved. Fix or confirm these entries, then send the result again."}
     now = workouts._dt()
-    for step in plan:  # a Done time before the workout started (clock skew) or missing is pinned inside it
+    adjusted = 0
+    for step in plan:  # a missing Done time, or one outside [started, now] (clock skew), is pinned inside it
         at = step["at"] or now
-        step["at"] = max(at, started)
+        step["at"] = max(min(at, now), started)
+        adjusted += step["at"] != at
     plan.sort(key=lambda s: (s["at"], s["index"]))
     todo, duplicates = [], 0
     for step in plan:
@@ -465,6 +471,12 @@ def log_guided_result(c, session_id, completed, ended="finished", finish=True):
     active = c.execute("SELECT id FROM sessions WHERE status='in_progress'").fetchone()
     active_id = active["id"] if active else None
     status_before = session["status"]
+    if status_before != "in_progress" and (todo or items) and not session["closed_by_inactivity"]:
+        return {"status": "rejected", "reason": "session_closed", "session_id": session_id, "logged": [],
+                "session_status": status_before, "active_session_id": active_id,
+                "note": (f"Nothing saved: workout #{session_id} was already ended ({status_before}) by a finish or "
+                         "abandon, not by the 15-minute inactivity rule, so it is not reopened. Ask the user whether "
+                         "these sets belong to that workout or should be logged another way.")}
     if status_before != "in_progress" and (todo or items) and active_id is not None:
         return {"status": "rejected", "reason": "other_workout_active", "session_id": session_id, "logged": [],
                 "session_status": status_before, "active_session_id": active_id,
@@ -475,10 +487,11 @@ def log_guided_result(c, session_id, completed, ended="finished", finish=True):
         with dbm.transaction(c):
             if status_before != "in_progress" and (todo or items):
                 first = todo[0]["at"] if todo else now
-                c.execute("UPDATE sessions SET status='in_progress',ended_at=NULL,last_activity_at=? WHERE id=?",
-                          (workouts._iso(first), session_id))
-                c.execute("UPDATE workout_session_items SET status='pending' WHERE session_id=? AND status='skipped'",
-                          (session_id,))
+                c.execute("""UPDATE sessions SET status='in_progress',ended_at=NULL,closed_by_inactivity=0,
+                    last_activity_at=? WHERE id=?""", (workouts._iso(first), session_id))
+                # Only the items the idle close skipped go back to pending; intentional skips stay skipped.
+                c.execute("""UPDATE workout_session_items SET status='pending',skipped_by_inactivity=0
+                    WHERE session_id=? AND status='skipped' AND skipped_by_inactivity=1""", (session_id,))
                 reopened = True
             for step in todo:
                 # A long rest inside the run is not inactivity: keep the workout open up to each Done time.
@@ -507,9 +520,11 @@ def log_guided_result(c, session_id, completed, ended="finished", finish=True):
         note += f"; {duplicates} were already saved and were skipped"
     if reopened:
         note += f"; the workout had closed while the user trained offline ({status_before}) and was reopened for them"
+    if adjusted:
+        note += f"; {adjusted} Done time(s) before the workout started or in the future (clock skew) were pinned inside it"
     note += f". Workout status: {final['status']}."
     return {"status": "logged" if logged else ("already_logged" if duplicates else "nothing_to_log"),
             "session_id": session_id, "ended": ended, "logged": logged, "already_logged": duplicates,
-            "items_completed": items, "reopened": reopened, "session_status": final["status"],
+            "items_completed": items, "reopened": reopened, "times_adjusted": adjusted, "session_status": final["status"],
             "ended_at": final["ended_at"], "finished": final["status"] == "completed", "note": note,
             "workout": finished if isinstance(finished, dict) else None}

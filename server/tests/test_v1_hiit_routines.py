@@ -66,7 +66,7 @@ class MigrationV3Test(unittest.TestCase):
         c, ids = legacy_v2_db(self.path)
         before = snapshot(c)
         dbm.init(c)
-        self.assertEqual(c.execute("SELECT version FROM schema_version").fetchone()[0], 3)
+        self.assertEqual(c.execute("SELECT version FROM schema_version").fetchone()[0], 4)
         types = dict(c.execute("SELECT id,routine_type FROM workout_routines").fetchall())
         self.assertEqual(types[ids["hiit"]], "hiit")     # name says HIIT (and every item is timed)
         self.assertEqual(types[ids["std"]], "standard")  # sets/reps/weight
@@ -95,7 +95,7 @@ class MigrationV3Test(unittest.TestCase):
         c.close()
         c = dbm.connect(self.path)
         self.assertEqual(snapshot(c), once)
-        self.assertEqual(c.execute("SELECT version FROM schema_version").fetchone()[0], 3)
+        self.assertEqual(c.execute("SELECT version FROM schema_version").fetchone()[0], 4)
         self.assertEqual(routines.get_routine(c, ids["timed"])["routine_type"], "standard")
         c.close()
 
