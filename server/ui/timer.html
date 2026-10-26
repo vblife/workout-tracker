@@ -24,7 +24,8 @@ button:disabled{background:var(--disabled-bg);color:var(--disabled-fg);border-co
 #rsel{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:1vh}#rsel[hidden]{display:none}#rselLbl{color:var(--fg);font-size:clamp(16px,4.6vw,22px);font-weight:600}
 .rbtns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}.rbtns button{min-width:30vw;max-width:220px;background:var(--unsel-bg);color:var(--unsel-fg);border:3px solid var(--btn-line)}.rbtns button[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-fg);border-color:var(--sel-bg)}
 #status,#msg{font-size:clamp(12px,3.6vw,16px);color:var(--muted);min-height:1.2em}
-button#doneBtn{background:var(--start-bg);color:var(--start-fg);border-color:var(--start-bg);font-size:clamp(30px,10vw,48px);min-width:70vw;max-width:520px;padding:.6em 1em}
+/* Guided Done: same size as Start/Reset (the shared button rule), only the green marks it as the main action. */
+button#doneBtn{background:var(--start-bg);color:var(--start-fg);border-color:var(--start-bg)}
 #list{text-align:left;color:var(--fg);font-size:clamp(15px,4.4vw,20px);margin:1vh 0 0;padding-left:1.6em;max-width:100%;overflow-wrap:anywhere}#list li{margin:.25em 0}
 #forBot{color:var(--muted);font-size:clamp(12px,3.6vw,16px);margin-top:1vh}
 #summary{text-align:left;color:var(--muted);background:var(--btn-bg);border:1px solid var(--btn-line);border-radius:8px;padding:8px;font-size:12px;max-width:100%;max-height:30vh;overflow:auto;white-space:pre-wrap;word-break:break-all;-webkit-user-select:text;user-select:text}
@@ -151,26 +152,13 @@ function topUp(){if(!ac||!anchor||!running)return;var e=elapsed(),until=Math.min
 function reschedule(){clearScheduled();if(!running||!ac||ac.state!=="running")return;var e=elapsed();anchor={ctx:ac.currentTime+0.03,el:e};schedUntil=e-0.06;topUp()}
 function driftCheck(){if(!running||!ac)return;if(ac.state!=="running"){ac.resume&&ac.resume().catch(function(){});return}
  if(!anchor){reschedule();return}var expect=anchor.ctx+(elapsed()-anchor.el);if(Math.abs(ac.currentTime-expect)>0.25)reschedule();else topUp()}
-/* Truly silent looping <audio> keeps the media/audio session alive (lock screen, iOS ringer switch).
-   Generated at runtime (no network). Every sample is the 8-bit midpoint 128, i.e. zero amplitude: the earlier
-   loop nudged one sample every 400 (a 20 Hz click train), which was audible as a background buzz on iPhones. */
-/* keep-alive:begin (pure; also exercised by test_render_timer_html.py) */
-function silentWav(sr,seconds){var n=sr*seconds,buf=new ArrayBuffer(44+n),v=new DataView(buf),p=0;
- function s(x){for(var i=0;i<x.length;i++)v.setUint8(p++,x.charCodeAt(i))}function u32(x){v.setUint32(p,x,true);p+=4}function u16(x){v.setUint16(p,x,true);p+=2}
- s("RIFF");u32(36+n);s("WAVE");s("fmt ");u32(16);u16(1);u16(1);u32(sr);u32(sr);u16(1);u16(8);s("data");u32(n);
- for(var i=0;i<n;i++)v.setUint8(p++,128);
- return buf}
-/* keep-alive:end */
-var keep=null;
-function keepAlive(){if(keep||!SOUND)return keep;try{var buf=silentWav(8000,10);
- keep=new Audio(URL.createObjectURL(new Blob([buf],{type:"audio/wav"})));keep.loop=true;keep.preload="auto";keep.setAttribute("playsinline","");keep.setAttribute("webkit-playsinline","")}catch(e){keep=null}return keep}
-function keepPlay(){var a=keepAlive();if(a){var pr=a.play();if(pr&&pr.catch)pr.catch(function(){status()})}}
-function keepPause(){if(keep)try{keep.pause()}catch(e){}}
-function mediaSession(){var ms=navigator.mediaSession;if(!ms)return;try{var s=segs[Math.min(lastSeg,segs.length-1)]||{};
- if(window.MediaMetadata)ms.metadata=new MediaMetadata({title:label,artist:finished?t("done"):phaseText(s),album:"Workout Bot"});
- ms.playbackState=running?"playing":"paused";if(ms.setPositionState&&T>0)ms.setPositionState({duration:T,playbackRate:1,position:Math.min(elapsed(),T)})}catch(e){}}
-function msHandlers(){var ms=navigator.mediaSession;if(!ms)return;var h={play:function(){if(!running)toggle()},pause:function(){if(running)toggle()},stop:function(){if(running)toggle()},nexttrack:skip};
- for(var a in h)try{ms.setActionHandler(a,h[a])}catch(e){}}
+/* No media session. Sound is Web Audio only: no HTML audio element, no media metadata or action handlers, and
+   no "playback" audio session type. Any of those makes iOS/Android treat the page as a media player and show a
+   Now Playing / media notification card on Start (and pause other apps' audio, e.g. TikTok). The audio session
+   is "ambient" where supported, so cues mix with other audio. quietMedia() also clears anything left behind. */
+function quietMedia(){if(navigator.audioSession)try{navigator.audioSession.type="ambient"}catch(e){}
+ var ms=navigator.mediaSession;if(!ms)return;try{ms.metadata=null;ms.playbackState="none"}catch(e){}
+ ["play","pause","stop","nexttrack","previoustrack","seekbackward","seekforward","seekto"].forEach(function(a){try{ms.setActionHandler(a,null)}catch(e){}})}
 /* ---------- keep the screen on: Wake Lock API, fallback to hidden looping inline video ---------- */
 var wantAwake=bool(cfg.keep_awake,true),wl=null,awakeMode="off",video=$("nosleep");
 video.addEventListener("timeupdate",function(){if(video.currentTime>0.5)video.currentTime=Math.random()*0.4});
@@ -181,7 +169,7 @@ function acquireAwake(){if(!wantAwake||!running)return;
 function videoAwake(){try{var p=video.play();if(p&&p.then)p.then(function(){awakeMode="video";status()}).catch(function(){awakeMode="none";status()});else{awakeMode="video";status()}}catch(e){awakeMode="none";status()}}
 function releaseAwake(){if(wl){try{wl.release()}catch(e){}wl=null}try{video.pause()}catch(e){}awakeMode="off";status()}
 function status(){var s="";if(running&&wantAwake)s=awakeMode==="lock"?t("wlLock"):awakeMode==="video"?t("wlVideo"):awakeMode==="none"?t("wlNone"):"";else if(running)s=t("wlOff");
- if(running&&SOUND&&(!ac||ac.state!=="running"||(keep&&keep.paused)))s=(s?s+" \u00b7 ":"")+t("audioOff");$("status").textContent=s}
+ if(running&&SOUND&&(!ac||ac.state!=="running"))s=(s?s+" \u00b7 ":"")+t("audioOff");$("status").textContent=s}
 /* ---------- speech (optional, best effort; beeps are the reliable path) ---------- */
 function say(x){if(!SPEECH||!x||!window.speechSynthesis||document.hidden)return;try{var u=new SpeechSynthesisUtterance(String(x));u.lang=LANG==="zh"?"zh-CN":"en-US";u.rate=1.1;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function vibe(p){if(VIBE&&navigator.vibrate)try{navigator.vibrate(p)}catch(e){}}
@@ -208,15 +196,14 @@ function onTransitions(e){var i=segAt(e),fresh;
  for(var c=lastCue+1;c<cues.length&&cues[c].t<=e+1e-6;c++){fresh=e-cues[c].t<1.5;var q=cues[c];
   if(fresh){if(q.type==="short")say(q.n);else if(q.event==="begin"){say(t("go"));vibe(200)}else if(q.event==="next"){say(phaseText(segs[q.seg]));vibe(200)}else if(q.event==="finish"){say(t("done"));vibe([300,100,300,100,600])}}
   lastCue=c}
- if(i!==lastSeg){lastSeg=i;mediaSession()}}
+ if(i!==lastSeg)lastSeg=i}
 function tick(){if(started&&!finished){var e=elapsed();onTransitions(e);if(e>=T-1e-6){complete();return}if(running)driftCheck()}draw()}
-function complete(){running=false;finished=true;acc=T;if(cfg.hiit_id!==undefined&&cfg.hiit_id!==null)$("msg").textContent=t("tellChat",{id:text(cfg.hiit_id)});releaseAwake();setTimeout(function(){if(!running){keepPause();clearScheduled()}},2500);mediaSession();status();draw()}
+function complete(){running=false;finished=true;acc=T;if(cfg.hiit_id!==undefined&&cfg.hiit_id!==null)$("msg").textContent=t("tellChat",{id:text(cfg.hiit_id)});releaseAwake();setTimeout(function(){if(!running)clearScheduled()},2500);status();draw()}
 function startFresh(){started=true;finished=false;acc=0;lastSeg=-1;lastCue=-1;resume()}
-function resume(){ensureAudio();if(navigator.audioSession)try{navigator.audioSession.type="playback"}catch(e){}
- keepPlay();running=true;t0=now();reschedule();acquireAwake();msHandlers();mediaSession();status();draw()}
-function pause(){acc=elapsed();running=false;clearScheduled();keepPause();if(window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}releaseAwake();mediaSession();status();draw()}
+function resume(){quietMedia();ensureAudio();running=true;t0=now();reschedule();acquireAwake();status();draw()}
+function pause(){acc=elapsed();running=false;clearScheduled();if(window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}releaseAwake();status();draw()}
 function toggle(){if(!started||finished)startFresh();else if(running)pause();else resume()}
-function reset(){$("msg").textContent="";running=false;started=false;finished=false;acc=0;lastSeg=-1;lastCue=-1;clearScheduled();keepPause();releaseAwake();mediaSession();status();draw()}
+function reset(){$("msg").textContent="";running=false;started=false;finished=false;acc=0;lastSeg=-1;lastCue=-1;clearScheduled();releaseAwake();status();draw()}
 function skip(){if(!started||finished)return;var e=elapsed(),i=segAt(e);if(i>=segs.length)return;acc=segs[i].end;while(lastCue+1<cues.length&&cues[lastCue+1].t<acc-1e-6)lastCue++;if(running){t0=now();reschedule()}tick()}
 /* ---------- guided routine runner (mode "guided"): one step at a time, advanced by Done ----------
    Work counts up from 0 until Done, or counts down when the step has duration_s (a timed hold; Done is
@@ -277,17 +264,16 @@ function guidedRunner(){
  function enter(i,at){idx=i;t0=at;if(idx>=steps.length){finish("finished");return}phase="step";schedule();var s=steps[idx];
   say(s.kind==="rest"?t("rest"):title(s));vibe(200);draw()}
  function finish(kind){if(phase==="finished")return;phase="finished";ended=kind;running=false;armed=0;
-  setTimeout(function(){keepPause();clearScheduled()},2500);releaseAwake();say(t("done"));vibe([300,100,300,100,600]);showSummary();status();draw()}
- function begin(){ensureAudio();if(ac)ac.onstatechange=function(){if(phase==="step"||phase==="ready")schedule();status()};
-  if(navigator.audioSession)try{navigator.audioSession.type="playback"}catch(e){}
-  keepPlay();running=true;acquireAwake();if(ready>0){phase="ready";readyEnd=now()+ready*1000;schedule();draw()}else enter(0,now())}
+  setTimeout(clearScheduled,2500);releaseAwake();say(t("done"));vibe([300,100,300,100,600]);showSummary();status();draw()}
+ function begin(){quietMedia();ensureAudio();if(ac)ac.onstatechange=function(){if(phase==="step"||phase==="ready")schedule();status()};
+  running=true;acquireAwake();if(ready>0){phase="ready";readyEnd=now()+ready*1000;schedule();draw()}else enter(0,now())}
  function catchUp(){var n=now();if(phase==="ready"&&n>=readyEnd)enter(0,readyEnd);
   if(phase!=="step")return;var r=gCatchUp(steps,idx,t0,n);if(r.idx!==idx){completed=completed.concat(r.done);enter(r.idx,r.t0)}}
  function markDone(){catchUp();if(phase!=="step")return;var s=steps[idx],n=now();if(s.kind!=="rest")completed.push(gEntry(s,(n-t0)/1000,false,n));enter(idx+1,n)}
  function skipSet(){catchUp();if(phase!=="step"||steps[idx].kind==="rest")return;var j=idx+1;if(steps[j]&&steps[j].kind==="rest")j++;enter(j,now())}
  function pauseToggle(){if(phase==="idle"){begin();return}
-  if(phase==="ready"||phase==="step"){resumeTo=phase;pausedAt=now();phase="paused";running=false;clearScheduled();keepPause();releaseAwake();if(window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}}
-  else if(phase==="paused"){var sh=now()-pausedAt;t0+=sh;readyEnd+=sh;phase=resumeTo;ensureAudio();keepPlay();running=true;acquireAwake();schedule()}
+  if(phase==="ready"||phase==="step"){resumeTo=phase;pausedAt=now();phase="paused";running=false;clearScheduled();releaseAwake();if(window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}}
+  else if(phase==="paused"){var sh=now()-pausedAt;t0+=sh;readyEnd+=sh;phase=resumeTo;quietMedia();ensureAudio();running=true;acquireAwake();schedule()}
   status();draw()}
  function endTap(){if(phase==="idle"||phase==="finished")return;if(armed&&now()-armed<4000){finish("ended_early");return}armed=now();draw();setTimeout(draw,4100)}
  function showSummary(){var ol=$("list");ol.innerHTML="";
@@ -321,7 +307,7 @@ function guidedRunner(){
  $("doneBtn").onclick=markDone;$("start").onclick=pauseToggle;$("skip").onclick=skipSet;$("reset").onclick=endTap;
  var tb=$("tickOn");$("tickBox").hidden=!TICK;tb.checked=tickOn;tb.onchange=function(){tickOn=tb.checked;schedule()};
  var aw=$("awake");aw.checked=wantAwake;aw.onchange=function(){wantAwake=aw.checked;if(wantAwake)acquireAwake();else releaseAwake();status()};
- document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"){if(running){acquireAwake();if(ac&&ac.state!=="running")ac.resume&&ac.resume().catch(function(){});if(keep&&keep.paused)keepPlay();schedule()}draw()}});
+ document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"){if(running){acquireAwake();if(ac&&ac.state!=="running")ac.resume&&ac.resume().catch(function(){});schedule()}draw()}});
  window.addEventListener("pageshow",draw);window.addEventListener("focus",draw);
  document.title=label;document.documentElement.lang=LANG;$("awakeLbl").textContent=t("keepAwake");$("tickLbl").textContent=t("tick");
  if(!steps.length){$("msg").textContent=t("badLink")}
@@ -332,7 +318,7 @@ if(cfg.mode==="guided"){guidedRunner();return}
 $("start").onclick=toggle;$("reset").onclick=reset;$("skip").onclick=skip;
 var tb=$("tickOn");$("tickBox").hidden=!TICK;tb.checked=tickOn;tb.onchange=function(){tickOn=tb.checked;if(running)reschedule()};
 var aw=$("awake");aw.checked=wantAwake;aw.onchange=function(){wantAwake=aw.checked;if(wantAwake)acquireAwake();else releaseAwake();status()};
-document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"){if(running){acquireAwake();if(ac&&ac.state!=="running")ac.resume&&ac.resume().catch(function(){});if(keep&&keep.paused)keepPlay();reschedule()}tick()}});
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"){if(running){acquireAwake();if(ac&&ac.state!=="running")ac.resume&&ac.resume().catch(function(){});reschedule()}tick()}});
 window.addEventListener("pageshow",tick);window.addEventListener("focus",tick);
 document.title=label;document.documentElement.lang=LANG;$("start").textContent=t("start");$("reset").textContent=t("reset");$("skip").textContent=t("skip");$("awakeLbl").textContent=t("keepAwake");$("tickLbl").textContent=t("tick");
 if(msgs.length)$("msg").textContent=t(msgs[0]);

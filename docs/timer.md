@@ -2,8 +2,8 @@
 
 `server/ui/timer.html` is the standard countdown timer. `server/render_timer_html.py` turns it into one
 self-contained local HTML file that the bot sends as a `file://` attachment. The file makes zero network
-requests: CSS, JS, the keep-awake video (base64 `data:` URIs) and the silent keep-alive audio (a WAV built in
-JS as a `blob:` URL) are all inline. Never host it externally.
+requests: CSS, JS, and the keep-awake video (base64 `data:` URIs) are all inline; sounds are generated with
+Web Audio. Never host it externally.
 
 ## Generating a timer
 
@@ -32,7 +32,7 @@ The generator validates the config and injects it the same way `render_report_ht
 
 | Key | Default | Meaning |
 |---|---|---|
-| `label` (or `name`) | `Timer` | Title shown on the page and on the lock screen media card |
+| `label` (or `name`) | `Timer` | Title shown on the page and as the tab title |
 | `duration_s` | `60` | Single countdown, seconds or `m:ss` |
 | `ready_s` | `5` | Get-ready period before the first interval (0-60) |
 | `intervals` | none | `[{"kind": "work"/"rest"/"warmup"/"cooldown"/"interval", "seconds": 40, "label": "Burpees"}]` |
@@ -64,7 +64,7 @@ routine's `rounds`, or 1. The final rest is skipped, and the default 10 s warm-u
 If the routine has `round_options`, the page shows the round selector; otherwise the count is fixed. During a
 work interval that is followed by rest, the "Next" line names the upcoming exercise ("Next: Jump Squat", in zh
 "下一个: ..."). During rest it shows the next work interval and its length, as before. All other behavior
-(theme, cues, tick, keep-alive, language) is unchanged.
+(theme, cues, tick, language) is unchanged.
 
 ## Guided routine runner (standard routines)
 
@@ -77,8 +77,8 @@ preview that starts no workout (`--default-rest SECONDS` changes the 90 s defaul
   Warm-up and cool-down items (named so in `activity_name` or `notes`, e.g. "Treadmill warm-up", "Stretch")
   rest only when they set `rest_seconds` themselves. There is no rest after the final step.
 - **Clock.** A work step counts down only when the item has `target_duration_s` (it beeps short, short, long and
-  counts as done when it reaches 0). Every other work step counts up from 0:00 until the big **Done** button is
-  tapped. Rests count down and move on by themselves; **Next** ends a rest early. **Skip set** skips the set
+  counts as done when it reaches 0). Every other work step counts up from 0:00 until the green **Done** button
+  (same size as the other timer buttons) is tapped. Rests count down and move on by themselves; **Next** ends a rest early. **Skip set** skips the set
   and its rest. **Pause** freezes the clock. **End workout** needs a second tap within 4 s.
 - **Finish.** The finish screen lists only the sets marked Done (or holds that reached 0), with "N/M sets done",
   and a JSON summary (`<pre id="summary">` and `body[data-guided-summary]`):
@@ -96,7 +96,7 @@ preview that starts no workout (`--default-rest SECONDS` changes the 90 s defaul
   are per-run fields like `hiit_id`: they are left out of the cache key and patched into the out file, so
   starting the same routine again reuses the cached page.
 
-Cues, tick, keep-alive, wake lock, theme, and the en/zh language rule are shared with countdown mode.
+Cues, tick, the no-media-session audio, wake lock, theme, and the en/zh language rule are shared with countdown mode.
 
 ## Round selector
 
@@ -210,15 +210,16 @@ suspended the page. The template layers several techniques:
    firing in the background. Pause, Skip, and Reset cancel the scheduled nodes; Resume reschedules them. A
    drift check reschedules if the audio clock and the wall clock disagree by more than 250 ms (for example
    after the context was suspended).
-3. **Audio session keep-alive.** A truly silent looping `<audio>` track plays while the timer runs: a 10 s,
-   8 kHz, 8-bit WAV built in JS where every sample is the midpoint value 128 (zero amplitude). An earlier
-   version nudged one sample in every 400 by one step, a 20 Hz click train at about -42 dBFS. That was the
-   continuous background buzz heard on iPhones, so it was removed. The element counts as playing media
-   whatever its samples are, and the pre-scheduled cues and ticks run on the `AudioContext`. No oscillator runs
-   continuously, and the hidden keep-awake videos are muted and have no audio track. The track plays with Media Session
-   metadata (label and current phase), play/pause/next handlers, and position state. On iOS
-   `navigator.audioSession.type = "playback"` is also set where supported. This keeps the page an active
-   media session and on iOS also lets Web Audio play with the ringer switch on silent.
+3. **No media session.** Sound is Web Audio only. The page never plays an HTML `<audio>` element, sets no
+   Media Session metadata or action handlers, and never sets `navigator.audioSession.type = "playback"`. Any
+   of those makes iOS and Android treat the page as a media player: Start opened a Now Playing / media
+   notification card and paused other apps' audio (for example TikTok). On Start and Resume the page sets
+   `navigator.audioSession.type = "ambient"` where supported, so cues mix with other audio, and clears any
+   media metadata and handlers. The only unlock is a one-sample silent `AudioContext` buffer inside the tap.
+   No oscillator runs continuously, and the hidden keep-awake videos are muted and have no audio track.
+   Trade-off: an earlier version looped a silent `<audio>` track to keep a media session alive while the
+   screen was locked and to play through the iOS ringer switch. Without it, iOS may silence cues when the
+   ringer switch is on silent and may suspend audio once the screen locks, so keep the screen on.
 4. **Screen Wake Lock** with a visible "Keep screen on" toggle (on by default), re-acquired on
    `visibilitychange`. If the API is missing or the request is refused, a tiny muted looping inline video
    (NoSleep.js technique, base64 inline) is played instead. The status line shows which mode is active.
@@ -231,8 +232,8 @@ known browser behavior, plus desktop/headless Chrome testing. Please report what
 
 | | Keep screen on | Screen turned off / locked | Vibration |
 |---|---|---|---|
-| **Android Chrome** | Wake Lock (Chrome 84+). | Good: a page playing audio is exempt from heavy background throttling; pre-scheduled beeps keep playing and a media notification appears. Time is always correct on return. | Yes, but Chrome may ignore `vibrate()` while the page is hidden. |
-| **iOS Safari** | Wake Lock in Safari 16.4+ (Home Screen web apps only from iOS 18.4); older iOS uses the video fallback. | Best effort. iOS suspends page JS when the screen locks unless the page is actively playing media. The silent audio track and the media session aim to keep audio alive so scheduled beeps fire, but iOS may still suspend or interrupt Web Audio (calls, Siri, other apps' audio, Low Power Mode). Time is always correct on return; tap Resume if the status line says sound is blocked. | Not supported on iOS (no Vibration API). |
+| **Android Chrome** | Wake Lock (Chrome 84+). | Pre-scheduled beeps usually keep playing for a while, but Chrome may throttle or suspend a hidden page that is not playing media. No media notification appears. Time is always correct on return. | Yes, but Chrome may ignore `vibrate()` while the page is hidden. |
+| **iOS Safari** | Wake Lock in Safari 16.4+ (Home Screen web apps only from iOS 18.4); older iOS uses the video fallback. | Best effort. iOS suspends page JS when the screen locks unless the page is actively playing media. The page does not register a media session (so no Now Playing card), so scheduled beeps may stop once the screen locks, and iOS may also suspend or interrupt Web Audio (calls, Siri, Low Power Mode). With the ringer switch on silent, cues may be muted. Time is always correct on return; tap Resume if the status line says sound is blocked. | Not supported on iOS (no Vibration API). |
 | **In-app webviews** (Grok Bot app, other chat apps) | Depends on the host app. Android WebView and iOS WKWebView follow their engines, but the app can block the wake lock or inline/background media. The video fallback usually still keeps the screen on while the page is visible. | Usually worse than the real browser: many apps pause their webview when backgrounded or when the screen locks. Media Session is not available in Android WebView. Some file previewers do not run JavaScript at all. | Android WebView: usually. iOS: no. |
 
 Practical guidance for users:
