@@ -30,7 +30,6 @@ button#doneBtn{background:var(--start-bg);color:var(--start-fg);border-color:var
 #forBot{color:var(--muted);font-size:clamp(12px,3.6vw,16px);margin-top:1vh}
 #summary{text-align:left;color:var(--muted);background:var(--btn-bg);border:1px solid var(--btn-line);border-radius:8px;padding:8px;font-size:12px;max-width:100%;max-height:30vh;overflow:auto;white-space:pre-wrap;word-break:break-all;-webkit-user-select:text;user-select:text}
 #list[hidden],#summary[hidden],#forBot[hidden]{display:none}
-#nosleep{position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none}
 </style></head><body class="idle"><main>
 <div id="label">Timer</div><div id="phase"></div><div id="time">0:00</div><div id="sub"></div><div id="next"></div><div id="bar"><i></i></div>
 <div id="rsel" role="group" aria-labelledby="rselLbl" hidden><div id="rselLbl">Rounds</div><div class="rbtns" id="rbtns"></div></div>
@@ -39,7 +38,6 @@ button#doneBtn{background:var(--start-bg);color:var(--start-fg);border-color:var
 <label class="toggle" id="tickBox"><input type="checkbox" id="tickOn" checked><span id="tickLbl">Tick</span></label>
 <div id="status"></div><div id="msg"></div>
 <ol id="list" hidden></ol><div id="forBot" hidden></div><pre id="summary" hidden></pre></main>
-<video id="nosleep" muted playsinline loop preload="auto" aria-hidden="true"><source type="video/webm" src="data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAHGEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHGTbuMU6uEElTDZ1OsggETTbuMU6uEHFO7a1OsggGw7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmoCrXsYMPQkBNgIRMYXZmV0GETGF2ZkSJiECfQAAAAAAAFlSua8iuAQAAAAAAAD/XgQFzxYgAAAAAAAAAAZyBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhDuaygDgkLCBELqBEJqBAlWwhFW5gQESVMNn0HNzzWPAi2PFiAAAAAAAAAABZ8iYRaOHRU5DT0RFUkSHi0xhdmMgbGlidnB4Z8ihRaOIRFVSQVRJT05Eh5MwMDowMDowMi4wMDAwMDAwMDAAH0O2dcPngQCjo4EAAIAQAgCdASoQABAAAEcIhYWImYSIAgIADA1gAP7/q1CAo5mBA+gAsQEAARAQABgAMD/0DAAAAP7/q1CAHFO7a5G7j7OBALeK94EB8YIBaPCBAw=="><source type="video/mp4" src="data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMHbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlZ0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHObWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABeW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAATlzdGJsAAAAuXN0c2QAAAAAAAAAAQAAAKlhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABDExhdmMgbGlieDI2NAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAAL2F2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMACDxImSABAAZoy4BlLIAAAAAQcGFzcAAAAAEAAAABAAAAFGJ0cnQAAAAAAAAAZAAAAAAAAAAYc3R0cwAAAAAAAAABAAAAAgAAQAAAAAAUc3RzcwAAAAAAAAABAAAAAQAAABxzdHNjAAAAAAAAAAEAAAABAAAAAgAAAAEAAAAcc3RzegAAAAAAAAAAAAAAAgAAAA8AAAAKAAAAFHN0Y28AAAAAAAAAAQAAAzcAAAA9dWR0YQAAADVtZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAAhpbHN0AAAACGZyZWUAAAAhbWRhdAAAAAtliIQFvJigACFPgAAAAAZBmjgK+oA="></video>
 <script>
 (function(){
 "use strict";
@@ -49,11 +47,11 @@ button#doneBtn{background:var(--start-bg);color:var(--start-fg);border-color:var
 /* UI text tables. English is the default; "zh" is the only other locale. Unknown values fall back to English. */
 var STRINGS={
  en:{start:"Start",pause:"Pause",resume:"Resume",reset:"Reset",skip:"Skip",ready:"Get ready",work:"Work",rest:"Rest",warmup:"Warm-up",cooldown:"Cool-down",interval:"",done:"Done!",next:"Next",round:"Round {r}/{n}",left:"{t} left",keepAwake:"Keep screen on",tick:"Tick",go:"Go",
-  wlLock:"Screen stays on (wake lock)",wlVideo:"Screen stays on (video fallback)",wlOff:"Screen may turn off; audio cues are pre-scheduled",wlNone:"Keep-screen-on is not available here; leave the screen on for the most reliable cues",
+  wlLock:"Screen stays on (wake lock)",wlOff:"Screen may turn off; audio cues are pre-scheduled",wlNone:"Keep-screen-on is not available here; leave the screen on for the most reliable cues",
   audioOff:"Sound is off or blocked; tap Resume to re-enable",total:"Total {t}",tellChat:"Tell the chat you finished HIIT #{id} so it can be logged",badLink:"Bad timer link; using defaults",rounds:"Rounds",roundsN:"{n} rounds",
   setDone:"Done",setOf:"Set {i}/{n}",repsN:"{n} reps",hold:"Hold {t}",skipSet:"Skip set",end:"End workout",endConfirm:"Tap again to end",finished:"Workout finished",stopped:"Workout ended early",completedN:"{n}/{m} sets done",setsN:"{n} sets",noneDone:"No sets were marked Done",tellBot:"Tell Workout Bot you are done so it logs only the sets marked Done",forBot:"For Workout Bot"},
  zh:{start:"\u5f00\u59cb",pause:"\u6682\u505c",resume:"\u7ee7\u7eed",reset:"\u91cd\u7f6e",skip:"\u8df3\u8fc7",ready:"\u51c6\u5907",work:"\u8bad\u7ec3",rest:"\u4f11\u606f",warmup:"\u70ed\u8eab",cooldown:"\u653e\u677e",interval:"",done:"\u5b8c\u6210!",next:"\u4e0b\u4e00\u4e2a",round:"\u7b2c {r}/{n} \u8f6e",left:"\u5269\u4f59 {t}",keepAwake:"\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae",tick:"\u6ef4\u7b54\u58f0",go:"\u5f00\u59cb",
-  wlLock:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (wake lock)",wlVideo:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (video)",wlOff:"\u5c4f\u5e55\u53ef\u80fd\u5173\u95ed\uff1b\u63d0\u793a\u97f3\u5df2\u9884\u5148\u5b89\u6392",wlNone:"\u6b64\u5904\u65e0\u6cd5\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae\uff0c\u8bf7\u5c3d\u91cf\u4e0d\u8981\u9501\u5c4f",
+  wlLock:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (wake lock)",wlOff:"\u5c4f\u5e55\u53ef\u80fd\u5173\u95ed\uff1b\u63d0\u793a\u97f3\u5df2\u9884\u5148\u5b89\u6392",wlNone:"\u6b64\u5904\u65e0\u6cd5\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae\uff0c\u8bf7\u5c3d\u91cf\u4e0d\u8981\u9501\u5c4f",
   audioOff:"\u58f0\u97f3\u88ab\u5173\u95ed\u6216\u963b\u6b62\uff0c\u8bf7\u70b9\u201c\u7ee7\u7eed\u201d\u91cd\u65b0\u542f\u7528",total:"\u603b\u8ba1 {t}",tellChat:"\u8bf7\u5728\u804a\u5929\u4e2d\u544a\u8bc9\u6211\u5df2\u5b8c\u6210 HIIT #{id}\uff0c\u4ee5\u4fbf\u8bb0\u5f55",badLink:"\u94fe\u63a5\u65e0\u6548\uff0c\u4f7f\u7528\u9ed8\u8ba4\u8bbe\u7f6e",rounds:"\u7ec4\u6570",roundsN:"{n} \u7ec4",
   setDone:"\u5b8c\u6210",setOf:"\u7b2c {i}/{n} \u7ec4",repsN:"{n} \u6b21",hold:"\u4fdd\u6301 {t}",skipSet:"\u8df3\u8fc7\u672c\u7ec4",end:"\u7ed3\u675f\u8bad\u7ec3",endConfirm:"\u518d\u70b9\u4e00\u6b21\u7ed3\u675f",finished:"\u8bad\u7ec3\u5b8c\u6210",stopped:"\u8bad\u7ec3\u5df2\u63d0\u524d\u7ed3\u675f",completedN:"\u5df2\u5b8c\u6210 {n}/{m} \u7ec4",setsN:"\u5171 {n} \u7ec4",noneDone:"\u6ca1\u6709\u6807\u8bb0\u5b8c\u6210\u7684\u7ec4",tellBot:"\u8bf7\u544a\u8bc9 Workout Bot \u4f60\u5df2\u7ec3\u5b8c\uff0c\u4ee5\u4fbf\u53ea\u8bb0\u5f55\u6807\u8bb0\u5b8c\u6210\u7684\u7ec4",forBot:"\u7ed9 Workout Bot \u7684\u8bb0\u5f55"}
 };
@@ -152,23 +150,26 @@ function topUp(){if(!ac||!anchor||!running)return;var e=elapsed(),until=Math.min
 function reschedule(){clearScheduled();if(!running||!ac||ac.state!=="running")return;var e=elapsed();anchor={ctx:ac.currentTime+0.03,el:e};schedUntil=e-0.06;topUp()}
 function driftCheck(){if(!running||!ac)return;if(ac.state!=="running"){ac.resume&&ac.resume().catch(function(){});return}
  if(!anchor){reschedule();return}var expect=anchor.ctx+(elapsed()-anchor.el);if(Math.abs(ac.currentTime-expect)>0.25)reschedule();else topUp()}
-/* No media session. Sound is Web Audio only: no HTML audio element, no media metadata or action handlers, and
-   no "playback" audio session type. Any of those makes iOS/Android treat the page as a media player and show a
-   Now Playing / media notification card on Start (and pause other apps' audio, e.g. TikTok). The audio session
-   is "ambient" where supported, so cues mix with other audio. quietMedia() also clears anything left behind. */
-function quietMedia(){if(navigator.audioSession)try{navigator.audioSession.type="ambient"}catch(e){}
- var ms=navigator.mediaSession;if(!ms)return;try{ms.metadata=null;ms.playbackState="none"}catch(e){}
- ["play","pause","stop","nexttrack","previoustrack","seekbackward","seekforward","seekto"].forEach(function(a){try{ms.setActionHandler(a,null)}catch(e){}})}
-/* ---------- keep the screen on: Wake Lock API, fallback to hidden looping inline video ---------- */
-var wantAwake=bool(cfg.keep_awake,true),wl=null,awakeMode="off",video=$("nosleep");
-video.addEventListener("timeupdate",function(){if(video.currentTime>0.5)video.currentTime=Math.random()*0.4});
-function acquireAwake(){if(!wantAwake||!running)return;
+/* No media session. Sound is Web Audio only. The page has no audio or video element, never starts media
+   element playback, and never touches the Media Session API, not even to clear it: in WebKit, reading the
+   navigator's media session object creates a platform media session, and clearing action handlers updates
+   the system remote commands. It never sets audio session type "playback", which makes a WebKit
+   AudioContext Now Playing eligible. Any of these lets iOS/Android show a Now Playing / media card on Start
+   and pause other apps' audio (e.g. TikTok). The audio session is "ambient" where supported, set at load
+   and again before every Start and Resume. */
+function ambientAudio(){if(navigator.audioSession)try{navigator.audioSession.type="ambient"}catch(e){}}
+ambientAudio();
+/* ---------- keep the screen on: Screen Wake Lock API only ----------
+   No muted looping video fallback (NoSleep.js): a playing media element is a media session client and can
+   bring up Now Playing / a host app's media player. Where Wake Lock is missing or refused, the status line
+   asks the user to keep the screen on. */
+var wantAwake=bool(cfg.keep_awake,true),wl=null,awakeMode="off";
+function acquireAwake(){if(!running||!wantAwake)return;
  if(navigator.wakeLock&&navigator.wakeLock.request){if(wl&&!wl.released){awakeMode="lock";status();return}
   navigator.wakeLock.request("screen").then(function(s){wl=s;awakeMode="lock";status();s.addEventListener("release",function(){if(wl===s)wl=null;if(awakeMode==="lock")awakeMode="off";status()});
-   if(!running||!wantAwake)releaseAwake()}).catch(function(){videoAwake()})}else videoAwake()}
-function videoAwake(){try{var p=video.play();if(p&&p.then)p.then(function(){awakeMode="video";status()}).catch(function(){awakeMode="none";status()});else{awakeMode="video";status()}}catch(e){awakeMode="none";status()}}
-function releaseAwake(){if(wl){try{wl.release()}catch(e){}wl=null}try{video.pause()}catch(e){}awakeMode="off";status()}
-function status(){var s="";if(running&&wantAwake)s=awakeMode==="lock"?t("wlLock"):awakeMode==="video"?t("wlVideo"):awakeMode==="none"?t("wlNone"):"";else if(running)s=t("wlOff");
+   if(!running||!wantAwake)releaseAwake()}).catch(function(){awakeMode="none";status()})}else{awakeMode="none";status()}}
+function releaseAwake(){if(wl){try{wl.release()}catch(e){}wl=null}awakeMode="off";status()}
+function status(){var s="";if(running&&wantAwake)s=awakeMode==="lock"?t("wlLock"):awakeMode==="none"?t("wlNone"):"";else if(running)s=t("wlOff");
  if(running&&SOUND&&(!ac||ac.state!=="running"))s=(s?s+" \u00b7 ":"")+t("audioOff");$("status").textContent=s}
 /* ---------- speech (optional, best effort; beeps are the reliable path) ---------- */
 function say(x){if(!SPEECH||!x||!window.speechSynthesis||document.hidden)return;try{var u=new SpeechSynthesisUtterance(String(x));u.lang=LANG==="zh"?"zh-CN":"en-US";u.rate=1.1;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
@@ -200,8 +201,8 @@ function onTransitions(e){var i=segAt(e),fresh;
 function tick(){if(started&&!finished){var e=elapsed();onTransitions(e);if(e>=T-1e-6){complete();return}if(running)driftCheck()}draw()}
 function complete(){running=false;finished=true;acc=T;if(cfg.hiit_id!==undefined&&cfg.hiit_id!==null)$("msg").textContent=t("tellChat",{id:text(cfg.hiit_id)});releaseAwake();setTimeout(function(){if(!running)clearScheduled()},2500);status();draw()}
 function startFresh(){started=true;finished=false;acc=0;lastSeg=-1;lastCue=-1;resume()}
-function resume(){quietMedia();ensureAudio();running=true;t0=now();reschedule();acquireAwake();status();draw()}
-function pause(){acc=elapsed();running=false;clearScheduled();if(window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}releaseAwake();status();draw()}
+function resume(){ambientAudio();ensureAudio();running=true;t0=now();reschedule();acquireAwake();status();draw()}
+function pause(){acc=elapsed();running=false;clearScheduled();if(SPEECH&&window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}releaseAwake();status();draw()}
 function toggle(){if(!started||finished)startFresh();else if(running)pause();else resume()}
 function reset(){$("msg").textContent="";running=false;started=false;finished=false;acc=0;lastSeg=-1;lastCue=-1;clearScheduled();releaseAwake();status();draw()}
 function skip(){if(!started||finished)return;var e=elapsed(),i=segAt(e);if(i>=segs.length)return;acc=segs[i].end;while(lastCue+1<cues.length&&cues[lastCue+1].t<acc-1e-6)lastCue++;if(running){t0=now();reschedule()}tick()}
@@ -265,15 +266,15 @@ function guidedRunner(){
   say(s.kind==="rest"?t("rest"):title(s));vibe(200);draw()}
  function finish(kind){if(phase==="finished")return;phase="finished";ended=kind;running=false;armed=0;
   setTimeout(clearScheduled,2500);releaseAwake();say(t("done"));vibe([300,100,300,100,600]);showSummary();status();draw()}
- function begin(){quietMedia();ensureAudio();if(ac)ac.onstatechange=function(){if(phase==="step"||phase==="ready")schedule();status()};
+ function begin(){ambientAudio();ensureAudio();if(ac)ac.onstatechange=function(){if(phase==="step"||phase==="ready")schedule();status()};
   running=true;acquireAwake();if(ready>0){phase="ready";readyEnd=now()+ready*1000;schedule();draw()}else enter(0,now())}
  function catchUp(){var n=now();if(phase==="ready"&&n>=readyEnd)enter(0,readyEnd);
   if(phase!=="step")return;var r=gCatchUp(steps,idx,t0,n);if(r.idx!==idx){completed=completed.concat(r.done);enter(r.idx,r.t0)}}
  function markDone(){catchUp();if(phase!=="step")return;var s=steps[idx],n=now();if(s.kind!=="rest")completed.push(gEntry(s,(n-t0)/1000,false,n));enter(idx+1,n)}
  function skipSet(){catchUp();if(phase!=="step"||steps[idx].kind==="rest")return;var j=idx+1;if(steps[j]&&steps[j].kind==="rest")j++;enter(j,now())}
  function pauseToggle(){if(phase==="idle"){begin();return}
-  if(phase==="ready"||phase==="step"){resumeTo=phase;pausedAt=now();phase="paused";running=false;clearScheduled();releaseAwake();if(window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}}
-  else if(phase==="paused"){var sh=now()-pausedAt;t0+=sh;readyEnd+=sh;phase=resumeTo;quietMedia();ensureAudio();running=true;acquireAwake();schedule()}
+  if(phase==="ready"||phase==="step"){resumeTo=phase;pausedAt=now();phase="paused";running=false;clearScheduled();releaseAwake();if(SPEECH&&window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}}
+  else if(phase==="paused"){var sh=now()-pausedAt;t0+=sh;readyEnd+=sh;phase=resumeTo;ambientAudio();ensureAudio();running=true;acquireAwake();schedule()}
   status();draw()}
  function endTap(){if(phase==="idle"||phase==="finished")return;if(armed&&now()-armed<4000){finish("ended_early");return}armed=now();draw();setTimeout(draw,4100)}
  function showSummary(){var ol=$("list");ol.innerHTML="";

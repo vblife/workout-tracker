@@ -2,8 +2,7 @@
 
 `server/ui/timer.html` is the standard countdown timer. `server/render_timer_html.py` turns it into one
 self-contained local HTML file that the bot sends as a `file://` attachment. The file makes zero network
-requests: CSS, JS, and the keep-awake video (base64 `data:` URIs) are all inline; sounds are generated with
-Web Audio. Never host it externally.
+requests: CSS and JS are inline; sounds are generated with Web Audio. The page contains no media elements. Never host it externally.
 
 ## Generating a timer
 
@@ -210,19 +209,30 @@ suspended the page. The template layers several techniques:
    firing in the background. Pause, Skip, and Reset cancel the scheduled nodes; Resume reschedules them. A
    drift check reschedules if the audio clock and the wall clock disagree by more than 250 ms (for example
    after the context was suspended).
-3. **No media session.** Sound is Web Audio only. The page never plays an HTML `<audio>` element, sets no
-   Media Session metadata or action handlers, and never sets `navigator.audioSession.type = "playback"`. Any
-   of those makes iOS and Android treat the page as a media player: Start opened a Now Playing / media
-   notification card and paused other apps' audio (for example TikTok). On Start and Resume the page sets
-   `navigator.audioSession.type = "ambient"` where supported, so cues mix with other audio, and clears any
-   media metadata and handlers. The only unlock is a one-sample silent `AudioContext` buffer inside the tap.
-   No oscillator runs continuously, and the hidden keep-awake videos are muted and have no audio track.
-   Trade-off: an earlier version looped a silent `<audio>` track to keep a media session alive while the
-   screen was locked and to play through the iOS ringer switch. Without it, iOS may silence cues when the
-   ringer switch is on silent and may suspend audio once the screen locks, so keep the screen on.
-4. **Screen Wake Lock** with a visible "Keep screen on" toggle (on by default), re-acquired on
-   `visibilitychange`. If the API is missing or the request is refused, a tiny muted looping inline video
-   (NoSleep.js technique, base64 inline) is played instead. The status line shows which mode is active.
+3. **No media session.** Sound is Web Audio only. The page has no `<audio>` or `<video>` element, never
+   calls `HTMLMediaElement.play()`, never touches `navigator.mediaSession` (no metadata, no action handlers,
+   no `playbackState`, not even to clear them), and never sets `navigator.audioSession.type = "playback"`.
+   Any of those can make iOS and Android (or the app hosting an in-app webview) treat the page as a media
+   player: Start opens a Now Playing / media notification card and pauses other apps' audio (for example
+   TikTok). The page sets `navigator.audioSession.type = "ambient"` where supported, at load and again
+   before the `AudioContext` is created or resumed on every Start and Resume, so cues mix with other audio.
+   The only unlock is a one-sample silent `AudioContext` buffer inside the tap; no oscillator runs
+   continuously. `server/tests/test_render_timer_html.py` fails if any of these come back.
+   History: the first versions looped a silent `<audio>` track with Media Session metadata and action
+   handlers and set the audio session to `"playback"`, so Start registered a media player. #32 removed
+   those but still cleared `navigator.mediaSession` on every Start and kept a muted looping `<video>`
+   keep-awake fallback; Now Playing still appeared on Start on an iPhone. In current WebKit, reading
+   `navigator.mediaSession` creates a platform media session and `setActionHandler(…, null)` updates the
+   system remote commands, and a playing `<video>` is a media session client that host apps can observe, so
+   both are gone now. A WebKit `AudioContext` is Now Playing eligible only with audio session `"playback"` or
+   `"play-and-record"`, which the page never sets.
+   Trade-off: without a media session, iOS may silence cues when the ringer switch is on silent and may
+   suspend audio once the screen locks, so keep the screen on.
+4. **Screen Wake Lock only**, with a visible "Keep screen on" toggle (on by default), re-acquired on
+   `visibilitychange`. There is no video fallback (the NoSleep.js muted looping video was removed because a
+   playing media element can bring up Now Playing). If the API is missing or the request is refused, the
+   status line says keep-screen-on is not available, so leave the screen on by hand or raise the
+   auto-lock time. The status line shows which mode is active.
 5. **Vibration** via `navigator.vibrate` at transitions and at the end, where supported.
 
 ## What works where (honest summary)
@@ -233,8 +243,8 @@ known browser behavior, plus desktop/headless Chrome testing. Please report what
 | | Keep screen on | Screen turned off / locked | Vibration |
 |---|---|---|---|
 | **Android Chrome** | Wake Lock (Chrome 84+). | Pre-scheduled beeps usually keep playing for a while, but Chrome may throttle or suspend a hidden page that is not playing media. No media notification appears. Time is always correct on return. | Yes, but Chrome may ignore `vibrate()` while the page is hidden. |
-| **iOS Safari** | Wake Lock in Safari 16.4+ (Home Screen web apps only from iOS 18.4); older iOS uses the video fallback. | Best effort. iOS suspends page JS when the screen locks unless the page is actively playing media. The page does not register a media session (so no Now Playing card), so scheduled beeps may stop once the screen locks, and iOS may also suspend or interrupt Web Audio (calls, Siri, Low Power Mode). With the ringer switch on silent, cues may be muted. Time is always correct on return; tap Resume if the status line says sound is blocked. | Not supported on iOS (no Vibration API). |
-| **In-app webviews** (Grok Bot app, other chat apps) | Depends on the host app. Android WebView and iOS WKWebView follow their engines, but the app can block the wake lock or inline/background media. The video fallback usually still keeps the screen on while the page is visible. | Usually worse than the real browser: many apps pause their webview when backgrounded or when the screen locks. Media Session is not available in Android WebView. Some file previewers do not run JavaScript at all. | Android WebView: usually. iOS: no. |
+| **iOS Safari** | Wake Lock in Safari 16.4+ (Home Screen web apps only from iOS 18.4); older iOS has no keep-screen-on (the status line says so). | Best effort. iOS suspends page JS when the screen locks unless the page is actively playing media. The page does not register a media session (so no Now Playing card), so scheduled beeps may stop once the screen locks, and iOS may also suspend or interrupt Web Audio (calls, Siri, Low Power Mode). With the ringer switch on silent, cues may be muted. Time is always correct on return; tap Resume if the status line says sound is blocked. | Not supported on iOS (no Vibration API). |
+| **In-app webviews** (Grok Bot app, other chat apps) | Depends on the host app. Android WebView and iOS WKWebView follow their engines, but the app can block the wake lock or inline/background media. Without the wake lock there is no keep-screen-on; the status line says so. | Usually worse than the real browser: many apps pause their webview when backgrounded or when the screen locks. Media Session is not available in Android WebView. Some file previewers do not run JavaScript at all. | Android WebView: usually. iOS: no. |
 
 Practical guidance for users:
 
@@ -242,7 +252,8 @@ Practical guidance for users:
 - If it must run locked, open the file in the real browser (Chrome on Android, Safari on iOS) rather than an
   in-app preview, press Start, then lock. Keep the volume up.
 - The wake lock needs a secure context. `file://` pages count in Chrome and Safari, but some in-app viewers
-  load files in ways that do not; the video fallback covers that case while the page is visible.
+  load files in ways that do not. There the status line says keep-screen-on is not available: leave the
+  screen on by hand or open the file in the real browser.
 - Pressing the power button always turns the screen off; no web API can prevent that. Only audio keeps
   running in the background, and only when the platform allows it.
 
