@@ -21,12 +21,22 @@ Match the shipped weekly example titled like `Training & Nutrition Week · <star
 1. `Page` with `width="wide"`, a period title, and a one- or two-sentence `summary` of the main takeaway.
 2. Optional `TableOfContents` when there are about six or more sections.
 3. One short `Callout` for the period highlight (tone only when it fits info / success / warning / danger).
-4. Overview: two-column `Grid` of `Properties` for training totals and nutrient averages (or day totals for a daily report). When `energy_balance.available` is true, add the energy deficit next to calories (see Energy deficit below).
-5. Trends: `Segmented` switching training vs nutrition, then nested `Segmented` for the metric or nutrient; `LineChart` / `ColumnSeries` from the period's trend points in the `report` JSON (six weekly points for week/month views, twelve monthly points for year, recent four-week rhythm for day).
+4. Overview: two-column `Grid` of `Properties` for training totals and nutrient averages (or day totals for a daily report). When `energy_balance.available` is true, add the energy deficit next to calories: the period total `total_energy_deficit_kcal` for multi-day periods, or the day's `energy_deficit_kcal` (see Energy deficit below).
+5. Trends (multi-day periods only): `Segmented` switching training vs nutrition, then nested `Segmented` for the metric or nutrient; `LineChart` / `ColumnSeries` from `trend_series` in the `report` JSON (see Trend series below). The first and default training metric is training days, never training minutes. A daily report has no trend section.
 6. Goal progress table with hit rates and `Status` pills when goals exist.
 7. Period-over-period comparison when the tool returns a prior window.
 8. Strength / mix / PRs / streaks / routine use when present; omit empty sections (never render placeholder empty states).
 9. One short recommendations section grounded in the data.
+
+### Trend series
+
+`trend_series.primary_training_metric` is `training_days` for week, month, quarter, year, and all. Chart training days as the primary training trend; `training_minutes` remains on each point only for backward compatibility, so do not chart it as the featured training trend or describe training time as the headline trend.
+
+- Week: `trend_series.day_points` has one point per day of the report week with `date`, `trained` (1 or 0), `sessions`, `intake_kcal`, and `energy_deficit_kcal`. Chart the daily energy deficit with trained days marked. `trend_series.points` (group_by `week`, six weekly points) adds `training_days` per week for the recent rhythm.
+- Month: `trend_series.points` has six monthly points; year has twelve monthly points. Each point has `training_days` (days trained in that month), `total_energy_deficit_kcal`, `avg_daily_energy_deficit_kcal`, and `days_with_intake`, plus `strength_volume` and `cardio_minutes`.
+- Every multi-day point carries `training_days`, `total_energy_deficit_kcal`, `avg_daily_energy_deficit_kcal`, and `days_with_intake`. The deficit fields are null when `maintenance_kcal` is missing or the bucket has no confirmed intake; leave those points out of the deficit chart rather than plotting zero.
+- Strength volume and cardio duration stay as secondary training metrics.
+- Day: `trend_series` keeps a 28-day rhythm for legacy clients without training-day fields. Do not build or describe a multi-week training-days or training-time trend in a daily report.
 
 Use `show_progress` only when the user asks for a focused lift chart; that can stay an MCP Apps or chart reply and does not replace the period Page.
 
@@ -39,9 +49,9 @@ Daily (`period=day`) and weekly (`period=week`) reports use the same Page patter
 | Title | `Training & Nutrition Day · <date>` style | `Training & Nutrition Week · <start>–<end>` style |
 | Comparison | Today vs yesterday from `vs_previous` (day-over-day) | This week vs the prior week from `vs_previous` (week-over-week) |
 | Overview | Day totals for training and nutrients | Training totals and per-day nutrient averages |
-| Trends | Recent four-week rhythm from the `report` trend points | Six weekly points for training time, strength volume, and cardio duration |
+| Trends | None: no training-days or multi-week trend on a daily report | Per-day energy deficit with trained days marked (`day_points`), plus six weekly points for training days, strength volume, and cardio duration |
 | Goals | Distance to each daily target (how much is left, or how far over); for a calorie maximum, kcal under or over the maximum | Goal hit rates across the week |
-| Energy deficit | `energy_deficit_kcal` vs `target_energy_deficit_kcal` | `avg_daily_energy_deficit_kcal` and `days_meeting_deficit_target` of `days_with_intake` |
+| Energy deficit | `energy_deficit_kcal` vs `target_energy_deficit_kcal` | Week total `total_energy_deficit_kcal`, plus `avg_daily_energy_deficit_kcal` and `days_meeting_deficit_target` of `days_with_intake` |
 | Tips | Two or three short, concrete actions for tomorrow | Two or three short actions for the coming week |
 
 Tips for both say what to do more or less of (for example more cardio minutes, one fewer hard session, more mobility) and which nutrients to eat more or less of (for example more protein, less added sugar, more fiber). Tips name nutrients and amounts only, never foods, dishes, or meals.
@@ -53,12 +63,14 @@ A scheduled daily report runs in the evening, so treat the day as possibly unfin
 `report` returns `energy_balance`, computed from `settings.maintenance_kcal` and the user's own `calories_kcal` maximum goal. Show it only from those fields; never compute it from a calorie number in goal assumptions or memory, and never hard-code a calorie value.
 
 - Day: `maintenance_kcal`, `intake_kcal`, `energy_deficit_kcal` (maintenance minus intake), `target_energy_deficit_kcal` (maintenance minus the calorie maximum), `within_calorie_max`, `met_deficit_target`, `kcal_under_max` (negative means over the maximum), and `deficit_vs_target_kcal`.
-- Week and month: `avg_daily_energy_deficit_kcal`, `days_meeting_deficit_target`, `days_within_calorie_max`, `days_with_intake`, and per-day `days` for a chart. Longer periods return the same averages and counts without `days`.
+- Week, month, quarter, year, and all: `total_energy_deficit_kcal` (sum of each day's deficit on days with confirmed intake), `avg_daily_energy_deficit_kcal`, `days_meeting_deficit_target`, `days_within_calorie_max`, and `days_with_intake`. Week and month also return per-day `days`. There is no separate total for a day; use `energy_deficit_kcal`.
+- Always call out the period total when `energy_balance.available` is true, in both the chat summary and the Page, for example "This week created about 2,450 kcal of energy deficit" (the number comes only from `total_energy_deficit_kcal`, rounded). A negative total is a surplus: say "about N kcal over maintenance" instead of a negative deficit.
+- The total covers logged days only; when `days_with_intake` is lower than the days in the period, say how many days it covers.
 - Distance to the calorie goal is "N kcal under the maximum" or "N kcal over the maximum", plus the deficit vs its target (for example "deficit 570 kcal, target 470 kcal"). A calorie maximum is an upper limit, not a range.
 - Keep consumed and workout-burned energy separate. The deficit is against maintenance only; never add or subtract workout calories.
 - If `maintenance_kcal` is null, omit the deficit and add one short note that it needs a saved maintenance estimate (see `vblife-workout-nutrition`). If there is no calorie maximum goal, show the deficit without a target.
 - A daily report may run before the day ends: phrase an open day as the deficit so far.
-- Labels: "Energy deficit" and "Target deficit" in English. In Chinese, use the standard Chinese term for energy deficit (pinyin "nengliang quekou") and its target form.
+- Labels: "Energy deficit", "Total energy deficit", and "Target deficit" in English. In Chinese, use the standard Chinese term for energy deficit (pinyin "nengliang quekou"), its total form (pinyin "zong nengliang quekou"), and its target form; the period sentence is the Chinese for "this week created about N kcal of energy deficit" using that term.
 
 ### Nutrition privacy on the Page
 
@@ -88,12 +100,12 @@ If `WriteCanvas` fails after retries, send the short text summary from the struc
 Whether or not the Page writes cleanly, the short chat summary still covers:
 
 1. Period and primary goal progress.
-2. Sessions, training minutes, strength volume, cardio duration, distance, and estimated workout calories with confidence coverage.
+2. Training days, sessions, strength volume, cardio duration, distance, and estimated workout calories with confidence coverage.
 3. Confirmed nutrition totals for a day or per-day averages, recorded-day count, and goal-hit rates for longer periods; keep consumed and burned energy separate.
-4. Energy deficit vs target when `energy_balance.available` is true: the day's deficit and kcal under or over the calorie maximum, or the average daily deficit and days meeting the target for longer periods.
+4. Energy deficit when `energy_balance.available` is true: for a day, the day's deficit and kcal under or over the calorie maximum; for longer periods, always the period total (`total_energy_deficit_kcal`, for example "this week created about N kcal of energy deficit"), then the average daily deficit and days meeting the target.
 5. One or two actionable recommendations.
 
-Weekly reports explain the six weekly points for training time, strength volume, and cardio duration, plus the change vs the prior week. Monthly reports explain the same three metrics across six monthly points. Annual reports explain twelve monthly points. Daily reports cover today vs yesterday, distance to daily goals, and the recent four-week rhythm.
+Weekly reports explain which days were trained and the daily energy deficit, the six weekly points for training days, strength volume, and cardio duration, plus the change vs the prior week. Monthly reports explain training days and energy deficit across six monthly points. Annual reports explain twelve monthly points. Daily reports cover today vs yesterday, distance to daily goals, and the day's energy deficit when available, with no multi-week training trend.
 
 The chat summary is always in the user's language, stays short, and ends with the Page link. Never paste report HTML or the full Page body into chat.
 

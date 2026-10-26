@@ -118,17 +118,51 @@ def _trend_bounds(period,anchor):
   a,b=period_bounds(period,anchor) if period!="all" else (anchor-timedelta(days=365),anchor+timedelta(days=1))
   return ("week" if period=="quarter" else "month"),[(a,b)]
 
-def _trend(c,period,anchor,unit,tz):
-  group,bounds=_trend_bounds(period,anchor); points=[]
+def _daily_intake(c,a,b):
+  """Confirmed calories_kcal per user-local date in [a,b): {iso_date: kcal}."""
+  return {r["local_date"]:r["kcal"] for r in c.execute("""SELECT local_date,sum(calories_kcal) kcal FROM nutrition_entries
+    WHERE local_date>=? AND local_date<? AND calories_kcal IS NOT NULL GROUP BY local_date""",(a.isoformat(),b.isoformat()))}
+
+def _deficit_totals(intake,maintenance,a,b):
+  """Energy deficit (maintenance - intake) summed over days in [a,b) that have intake. None without maintenance."""
+  kcal=[v for k,v in intake.items() if a.isoformat()<=k<b.isoformat()]
+  deficits=[maintenance-v for v in kcal] if maintenance is not None else []
+  return {"days_with_intake":len(kcal),
+          "total_energy_deficit_kcal":round(sum(deficits),1) if deficits else None,
+          "avg_daily_energy_deficit_kcal":round(sum(deficits)/len(deficits),1) if deficits else None}
+
+def _trend(c,period,anchor,unit,tz,maintenance=None):
+  """Trend points. Multi-day periods add training_days (the primary training trend) and the energy deficit per point;
+  week also adds day_points (one per day of the report week). Day keeps its 28-day rhythm without training-day fields.
+  training_minutes stays on each point for backward compatibility only."""
+  group,bounds=_trend_bounds(period,anchor); points=[]; multi=period!="day"
+  intake=_daily_intake(c,bounds[0][0],bounds[-1][1]) if multi else {}
   for a,b in bounds:
     sessions=c.execute("SELECT * FROM sessions WHERE status='completed' AND started_at>=? AND started_at<?",(U(a,tz),U(b,tz))).fetchall()
     volume=c.execute("""SELECT coalesce(sum(x.weight_kg*x.reps),0) FROM sets x JOIN sessions s ON s.id=x.session_id
       WHERE s.status='completed' AND x.is_warmup=0 AND x.performed_at>=? AND x.performed_at<?""",(U(a,tz),U(b,tz))).fetchone()[0]
     training=sum(x["duration_min"] or x["calorie_duration_min"] or 0 for x in sessions)
     cardio=sum(x["duration_min"] or 0 for x in sessions if x["type"] in ("cardio","hike","hiit"))
-    points.append({"period":a.isoformat() if group!="month" else a.strftime("%Y-%m"),"training_minutes":round(training,1),
-      "strength_volume":to_unit(volume,unit),"cardio_minutes":round(cardio,1)})
-  return {"group_by":group,"points":points}
+    point={"period":a.isoformat() if group!="month" else a.strftime("%Y-%m"),"training_minutes":round(training,1),
+      "strength_volume":to_unit(volume,unit),"cardio_minutes":round(cardio,1)}
+    if multi:
+      point["training_days"]=len({_local(x["started_at"],tz).date() for x in sessions})
+      point.update(_deficit_totals(intake,maintenance,a,b))
+    points.append(point)
+  out={"group_by":group,"points":points}
+  if multi: out["primary_training_metric"]="training_days"
+  if period=="week":
+    a,b=period_bounds("week",anchor); intake_w={k:v for k,v in intake.items() if a.isoformat()<=k<b.isoformat()}
+    trained={}
+    for x in c.execute("SELECT started_at FROM sessions WHERE status='completed' AND started_at>=? AND started_at<?",(U(a,tz),U(b,tz))):
+      d=_local(x["started_at"],tz).date(); trained[d]=trained.get(d,0)+1
+    out["day_points"]=[]
+    for i in range(7):
+      d=a+timedelta(days=i); kcal=intake_w.get(d.isoformat())
+      out["day_points"].append({"date":d.isoformat(),"trained":1 if trained.get(d) else 0,"sessions":trained.get(d,0),
+        "intake_kcal":round(kcal,1) if kcal is not None else None,
+        "energy_deficit_kcal":round(maintenance-kcal,1) if kcal is not None and maintenance is not None else None})
+  return out
 
 def _nutrition(c,period,a,b,tz):
   # Group by the entry's stored local_date, the same day key as nutrition_daily_totals and nutrition goals.
@@ -173,6 +207,7 @@ def _energy_balance(c,period,a,b,settings):
     return out
   deficits=[d["energy_deficit_kcal"] for d in days if d["energy_deficit_kcal"] is not None]
   out.update(days_with_intake=len(days),
+             total_energy_deficit_kcal=round(sum(deficits),1) if deficits else None,
              avg_daily_energy_deficit_kcal=round(sum(deficits)/len(deficits),1) if deficits else None,
              days_meeting_deficit_target=sum(1 for d in days if d["met_deficit_target"]) if target is not None else None,
              days_within_calorie_max=sum(1 for d in days if d["within_calorie_max"]) if cal_max is not None else None)
@@ -195,7 +230,7 @@ def report(c,period="week",anchor_date=None,now=None):
   out["active_workout"]=workouts.get_active(c,now)["active_workout"]
   out["nutrition"]=_nutrition(c,period,a,b,tz)
   out["energy_balance"]=_energy_balance(c,period,a,b,s)
-  out["trend_series"]=_trend(c,period,anchor,unit,tz)
+  out["trend_series"]=_trend(c,period,anchor,unit,tz,s.get("maintenance_kcal"))
   out["goal_progress"]=[]
   for goal in goals.list_goals(c)["goals"]:
     try: out["goal_progress"].append(goals.goal_progress(c,goal["goal_id"],anchor.isoformat()))

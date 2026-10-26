@@ -45,9 +45,12 @@ class ReportsUITest(unittest.TestCase):
         for payload, count in ((weekly, 6), (monthly, 6), (annual, 12)):
             points = payload["trend_series"]["points"]
             self.assertEqual(len(points), count)
-            self.assertTrue(all({"training_minutes", "strength_volume", "cardio_minutes"}.issubset(point) for point in points))
+            self.assertTrue(all({"training_days", "strength_volume", "cardio_minutes", "total_energy_deficit_kcal"}.issubset(point) for point in points))
+            self.assertEqual(payload["trend_series"]["primary_training_metric"], "training_days")
         self.assertEqual(weekly["trend_series"]["group_by"], "week")
         self.assertEqual(monthly["trend_series"]["group_by"], "month")
+        self.assertEqual(len(weekly["trend_series"]["day_points"]), 7)
+        self.assertEqual(weekly["trend_series"]["points"][-2]["training_days"], 2)  # Fri lift + Sat run
 
     def test_daily_report_includes_nutrition_and_completed_only_workouts(self):
         draft = {"consumed_at": "2026-10-12T18:00:00Z", "capture_timezone": "America/Los_Angeles",
