@@ -276,6 +276,117 @@ def palette():
 STATES = ("idle", "ready", "work", "rest", "warmup", "cooldown", "interval", "paused", "done")
 
 
+class TimerCacheTest(unittest.TestCase):
+    SCRIPT = os.path.join(os.path.dirname(r.__file__), "render_timer_html.py")
+    HIIT = {"name": "Circuit", "rounds": 3, "warmup_s": 10, "cooldown_s": 30,
+            "segments": [{"kind": "work", "seconds": 40, "exercise": "Squats"}, {"kind": "rest", "seconds": 20}]}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.cache = os.path.join(self.tmp, "cache")
+
+    def run_cli(self, out_name, *args, env_cache=None):
+        env = {k: v for k, v in os.environ.items() if k != "WORKOUT_TIMER_CACHE"}
+        if env_cache is not None:
+            env["WORKOUT_TIMER_CACHE"] = env_cache
+        out = os.path.join(self.tmp, out_name)
+        res = subprocess.run([sys.executable, self.SCRIPT, out, *args], capture_output=True, text=True, env=env)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        with open(out, encoding="utf-8") as f:
+            return f.read(), res.stderr
+
+    def hiit_cli(self, out_name, hiit_id):
+        cfg = os.path.join(self.tmp, f"hiit-{hiit_id}.json")
+        with open(cfg, "w", encoding="utf-8") as f:
+            json.dump({**self.HIIT, "hiit_id": hiit_id}, f)
+        return self.run_cli(out_name, "--config", cfg, "--cache-dir", self.cache)
+
+    def cache_files(self):
+        return sorted(os.listdir(self.cache)) if os.path.isdir(self.cache) else []
+
+    def test_same_countdown_twice_is_a_hit_with_identical_output(self):
+        args = ("--duration", "5:00", "--label", "5-minute timer", "--cache-dir", self.cache)
+        first, err1 = self.run_cli("a.html", *args)
+        second, err2 = self.run_cli("b.html", *args)
+        key = r.fingerprint(r.normalize_config({"duration_s": 300, "label": "5-minute timer"}), template())
+        self.assertEqual(err1.strip(), f"timer cache miss {key}")
+        self.assertEqual(err2.strip(), f"timer cache hit {key}")
+        self.assertEqual(len(key), 32)
+        self.assertEqual(first, second)
+        self.assertEqual(self.cache_files(), [f"{key}.html"])
+        with open(r.cache_path(self.cache, key), encoding="utf-8") as f:
+            self.assertEqual(f.read(), first)
+        self.assertNotIn("hiit_id", json.loads(injected(first)))
+        self.assertEqual(first, r.render({"duration_s": 300, "label": "5-minute timer"}, template()))
+
+    def test_hiit_sessions_share_one_entry_and_embed_the_current_hiit_id(self):
+        first, err1 = self.hiit_cli("h1.html", 1)
+        second, err2 = self.hiit_cli("h2.html", 2)
+        self.assertIn("timer cache miss", err1)
+        self.assertIn("timer cache hit", err2)
+        self.assertEqual(len(self.cache_files()), 1)
+        self.assertEqual(json.loads(injected(first))["hiit_id"], 1)
+        self.assertEqual(json.loads(injected(second))["hiit_id"], 2)
+        expected = r.normalize_config({**self.HIIT, "hiit_id": 2})
+        self.assertEqual(json.loads(injected(second)), expected)
+        with open(os.path.join(self.cache, self.cache_files()[0]), encoding="utf-8") as f:
+            self.assertNotIn("hiit_id", json.loads(injected(f.read())))
+        a = r.normalize_config({**self.HIIT, "hiit_id": 1})
+        b = r.normalize_config({**self.HIIT, "hiit_id": "abc"})
+        self.assertEqual(r.fingerprint(a, template()), r.fingerprint(b, template()))
+        self.assertEqual(r.fingerprint(a, template()), r.fingerprint(r.normalize_config(self.HIIT), template()))
+
+    def test_hit_without_hiit_id_after_a_session_with_one(self):
+        self.hiit_cli("h1.html", 7)
+        cfg = os.path.join(self.tmp, "plain.json")
+        with open(cfg, "w", encoding="utf-8") as f:
+            json.dump(self.HIIT, f)
+        html, err = self.run_cli("plain.html", "--config", cfg, "--cache-dir", self.cache)
+        self.assertIn("timer cache hit", err)
+        self.assertNotIn("hiit_id", json.loads(injected(html)))
+
+    def test_apply_hiit_id_round_trips_escaped_json(self):
+        html = r.render({"duration_s": 60, "label": "<Plank> & hold"}, template())
+        patched = r.apply_hiit_id(html, 9)
+        cfg = json.loads(injected(patched))
+        self.assertEqual((cfg["hiit_id"], cfg["label"]), (9, "<Plank> & hold"))
+        self.assertNotIn("<Plank>", injected(patched))
+        self.assertEqual(r.apply_hiit_id(patched, None), html)
+        with self.assertRaises(ValueError):
+            r.apply_hiit_id("<html></html>", 1)
+
+    def test_template_or_config_change_is_a_new_key(self):
+        cfg = r.normalize_config({"duration_s": 300, "label": "5-minute timer"})
+        base = r.fingerprint(cfg, template())
+        self.assertNotEqual(base, r.fingerprint(cfg, template() + "<!-- v2 -->"))
+        self.assertNotEqual(base, r.fingerprint(r.normalize_config({"duration_s": 240, "label": "5-minute timer"}), template()))
+        self.assertNotEqual(base, r.fingerprint(r.normalize_config({"duration_s": 300, "label": "Plank"}), template()))
+        self.assertNotEqual(base, r.fingerprint(r.normalize_config({"duration_s": 300, "label": "5-minute timer",
+                                                                    "lang": "zh"}), template()))
+        self.run_cli("a.html", "--duration", "5:00", "--label", "5-minute timer", "--cache-dir", self.cache)
+        _, err = self.run_cli("b.html", "--duration", "4:00", "--label", "5-minute timer", "--cache-dir", self.cache)
+        self.assertIn("timer cache miss", err)
+        alt = os.path.join(self.tmp, "timer-v2.html")
+        with open(alt, "w", encoding="utf-8") as f:
+            f.write(template() + "<!-- v2 -->")
+        _, err = self.run_cli("c.html", "--duration", "5:00", "--label", "5-minute timer",
+                              "--template", alt, "--cache-dir", self.cache)
+        self.assertIn("timer cache miss", err)
+        self.assertEqual(len(self.cache_files()), 3)
+
+    def test_env_var_enables_the_cache(self):
+        _, err = self.run_cli("a.html", "--duration", "90", env_cache=self.cache)
+        self.assertIn("timer cache miss", err)
+        self.assertEqual(len(self.cache_files()), 1)
+
+    def test_no_cache_dir_writes_only_the_out_file(self):
+        html, err = self.run_cli("only.html", "--duration", "5:00", "--label", "5-minute timer")
+        self.assertEqual(err, "")
+        self.assertEqual(os.listdir(self.tmp), ["only.html"])
+        self.assertEqual(html, r.render({"duration_s": 300, "label": "5-minute timer"}, template()))
+
+
 class TimerThemeTest(unittest.TestCase):
     def test_dark_theme_in_every_state_without_light_flip(self):
         html = template()

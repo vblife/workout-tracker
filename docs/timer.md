@@ -18,6 +18,14 @@ python server/render_timer_html.py /workspace/hiit-timer.html --config hiit.json
 python server/render_timer_html.py /workspace/hiit-timer.html --work 40 --rest 20 --rounds 10,20 --label "HIIT 40/20"
 ```
 
+Add `--cache-dir DIR` (or set `WORKOUT_TIMER_CACHE=DIR`) to reuse rendered pages. The generator stores each
+page as `DIR/<key>.html`, where the key is a sha256 prefix of the template plus the normalized config, and a
+later call with the same template and config copies that page to the out path instead of rendering again
+(`timer cache hit <key>` / `timer cache miss <key>` on stderr). `hiit_id` is not part of the key: the cached
+page has none, and the current request's `hiit_id` is patched into the out file, so every session of the
+same HIIT routine shares one entry. Caching is off when neither is set. The bot uses
+`--cache-dir /workspace/timer-cache`.
+
 The generator validates the config and injects it the same way `render_report_html.py` does:
 `<script>window.openai={toolOutput:<config JSON>};</script>` before the template's first `<script>`, with
 `<`, `>` and `&` escaped. Config keys:
