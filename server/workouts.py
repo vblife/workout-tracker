@@ -48,8 +48,11 @@ def reconcile_active(c, at=None):
     status = "completed" if has_work else "abandoned"
     ended = last if has_work else last + INACTIVITY
     with dbm.transaction(c):
-        c.execute("UPDATE sessions SET status=?,ended_at=? WHERE id=?", (status, _iso(ended), row["id"]))
-        c.execute("UPDATE workout_session_items SET status='skipped' WHERE session_id=? AND status='pending'", (row["id"],))
+        # Mark this close (and the items it skipped) as the inactivity rule's, not the user's: only such a
+        # workout may be reopened by a late offline guided result, and only these items go back to pending.
+        c.execute("UPDATE sessions SET status=?,ended_at=?,closed_by_inactivity=1 WHERE id=?", (status, _iso(ended), row["id"]))
+        c.execute("""UPDATE workout_session_items SET status='skipped',skipped_by_inactivity=1
+            WHERE session_id=? AND status='pending'""", (row["id"],))
     return {"active": None, "closed": {"session_id": row["id"], "status": status, "ended_at": _iso(ended)}}
 
 
@@ -163,7 +166,7 @@ def set_session_item_status(c, item_id, status):
     if row["status"] == "replaced":
         raise _error("a replaced item cannot change status")
     with dbm.transaction(c):
-        c.execute("UPDATE workout_session_items SET status=? WHERE id=?", (status, item_id))
+        c.execute("UPDATE workout_session_items SET status=?,skipped_by_inactivity=0 WHERE id=?", (status, item_id))
     return {"status": status, "item_id": item_id}
 
 

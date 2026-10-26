@@ -108,6 +108,15 @@ class DbCase(unittest.TestCase):
         return self.c.execute("SELECT exercise_id,reps,performed_at FROM sets WHERE session_id=? ORDER BY performed_at",
                               (sid,)).fetchall()
 
+    def age(self, sid, hours=1):
+        """Move a still-active workout's start back so Done times minutes after it are in the past, not the future."""
+        old = workouts._iso(workouts._dt() - timedelta(hours=hours))
+        self.c.execute("UPDATE sessions SET started_at=?,last_activity_at=? WHERE id=?", (old, old, sid))
+        self.c.commit()
+
+    def item_status(self, sid):
+        return dict(self.c.execute("SELECT id,status FROM workout_session_items WHERE session_id=?", (sid,)).fetchall())
+
     def idle_close(self, sid, hours=2):
         """The user trained offline (nothing logged): age the workout so the 15-minute rule closes it."""
         old = workouts._iso(workouts._dt() - timedelta(hours=hours))
@@ -120,6 +129,7 @@ class DbCase(unittest.TestCase):
 class LogGuidedResultTest(DbCase):
     def test_writes_done_sets_at_done_at_and_finishes(self):
         out = self.start()
+        self.age(out["session_id"])
         res = routines.log_guided_result(self.c, out["session_id"], self.entries(out))
         self.assertEqual((res["status"], len(res["logged"]), res["session_status"], res["finished"]),
                          ("logged", 3, "completed", True))
@@ -154,6 +164,7 @@ class LogGuidedResultTest(DbCase):
 
     def test_sending_twice_is_idempotent(self):
         out = self.start()
+        self.age(out["session_id"])
         done = self.entries(out)
         routines.log_guided_result(self.c, out["session_id"], done)
         again = routines.log_guided_result(self.c, out["session_id"], done)
@@ -170,6 +181,75 @@ class LogGuidedResultTest(DbCase):
                          ("rejected", "other_workout_active", other["session_id"]))
         self.assertEqual(self.sets(out["session_id"]), [])
         self.assertEqual(self.c.execute("SELECT status FROM sessions WHERE id=?", (other["session_id"],)).fetchone()[0], "in_progress")
+
+    def test_deliberately_finished_or_abandoned_workout_is_not_reopened(self):
+        # #38 follow-up 1: only an idle close reopens; a stale replay must not revive a workout ended on purpose.
+        for end in ("finish", "abandon"):
+            out = self.start()
+            sid = out["session_id"]
+            if end == "finish":
+                workouts.finish_workout(self.c, session_id=sid)
+            else:
+                workouts.abandon_workout(self.c)
+            self.age(sid, hours=48)  # the result is replayed two days later
+            done = self.entries(out)
+            status = self.c.execute("SELECT status FROM sessions WHERE id=?", (sid,)).fetchone()[0]
+            res = routines.log_guided_result(self.c, sid, done)
+            self.assertEqual((res["status"], res["reason"], res["session_status"]), ("rejected", "session_closed", status))
+            self.assertEqual(self.sets(sid), [])
+            self.assertEqual(self.c.execute("SELECT status FROM sessions WHERE id=?", (sid,)).fetchone()[0], status)
+            self.assertIsNone(self.c.execute("SELECT id FROM sessions WHERE status='in_progress'").fetchone())
+
+    def test_replay_after_reopen_and_finish_does_not_reopen_again(self):
+        out = self.start()
+        sid = out["session_id"]
+        self.idle_close(sid)
+        done = self.entries(out)
+        self.assertTrue(routines.log_guided_result(self.c, sid, done[:2])["reopened"])
+        # The workout is now finished by log_guided_result itself, not idle-closed: new entries are refused.
+        res = routines.log_guided_result(self.c, sid, done)
+        self.assertEqual((res["status"], res["reason"]), ("rejected", "session_closed"))
+        self.assertEqual(len(self.sets(sid)), 1)
+        # An exact replay of what was already saved is still a harmless no-op.
+        again = routines.log_guided_result(self.c, sid, done[:2])
+        self.assertEqual((again["status"], again["reopened"]), ("already_logged", False))
+
+    def test_reopen_keeps_intentional_skips(self):
+        # #38 follow-up 2: only the items the idle close skipped go back to pending.
+        out = self.start()
+        sid = out["session_id"]
+        items = [row[0] for row in self.c.execute(
+            "SELECT id FROM workout_session_items WHERE session_id=? ORDER BY position", (sid,))]
+        warmup, bench, plank = items
+        workouts.set_session_item_status(self.c, plank, "skipped")  # the user skipped the plank on purpose
+        self.assertEqual(self.idle_close(sid), "abandoned")
+        self.assertEqual(self.item_status(sid), {warmup: "skipped", bench: "skipped", plank: "skipped"})
+        res = routines.log_guided_result(self.c, sid, self.entries(out)[:1], finish=False)  # warm-up only
+        self.assertEqual((res["reopened"], res["session_status"]), (True, "in_progress"))
+        self.assertEqual(self.item_status(sid), {warmup: "completed", bench: "pending", plank: "skipped"})
+
+    def test_future_done_at_is_pinned_to_now(self):
+        # #38 follow-up 3: a clock-skewed Done time after now is saved as now, never in the future.
+        out = self.start()
+        sid = out["session_id"]
+        before = workouts._dt()
+        done = self.entries(out, minutes=(30, 60, 90))  # the workout started just now, so these are in the future
+        res = routines.log_guided_result(self.c, sid, done)
+        after = workouts._dt()
+        self.assertEqual((res["status"], len(res["logged"]), res["times_adjusted"]), ("logged", 3, 3))
+        for row in self.sets(sid):
+            self.assertTrue(before <= workouts._dt(row[2]) <= after)
+        ended = workouts._dt(self.c.execute("SELECT ended_at FROM sessions WHERE id=?", (sid,)).fetchone()[0])
+        self.assertLessEqual(ended, after)
+
+    def test_schema_tracks_idle_closes(self):
+        self.assertEqual(self.c.execute("SELECT version FROM schema_version").fetchone()[0], 4)
+        out = self.start()
+        sid = out["session_id"]
+        self.idle_close(sid)
+        self.assertEqual(self.c.execute("SELECT closed_by_inactivity FROM sessions WHERE id=?", (sid,)).fetchone()[0], 1)
+        self.assertEqual({r[0] for r in self.c.execute(
+            "SELECT skipped_by_inactivity FROM workout_session_items WHERE session_id=?", (sid,))}, {1})
 
     def test_unknown_exercise_saves_nothing(self):
         out = self.start()

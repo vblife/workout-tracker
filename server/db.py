@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime,timezone
 from normalize import norm
 import seed_data
-SCHEMA_VERSION=3
+SCHEMA_VERSION=4
 DEFAULT_DB="/workspace/vblife/workout-data/workout.db"
 SCHEMA="""
 CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
@@ -172,6 +172,20 @@ def _migrate_v3(c):
         AND target_duration_s BETWEEN 1 AND 3600 AND routine_id IN(SELECT id FROM workout_routines WHERE routine_type='hiit')""")
       c.execute("UPDATE schema_version SET version=3")
 
+def _migrate_v4(c):
+  """Additive and idempotent: remember which closes came from the 15-minute inactivity rule, so a late offline
+  guided result may reopen only those workouts and restore only the items that close skipped (not the user's
+  own skips). Existing rows keep 0: a workout closed before this version is never reopened by a late result."""
+  with transaction(c):
+    cols=_columns(c,"sessions")
+    if "closed_by_inactivity" not in cols:
+      c.execute("ALTER TABLE sessions ADD COLUMN closed_by_inactivity INTEGER NOT NULL DEFAULT 0 CHECK(closed_by_inactivity IN(0,1))")
+    cols=_columns(c,"workout_session_items")
+    if "skipped_by_inactivity" not in cols:
+      c.execute("ALTER TABLE workout_session_items ADD COLUMN skipped_by_inactivity INTEGER NOT NULL DEFAULT 0 CHECK(skipped_by_inactivity IN(0,1))")
+    if _version(c)<4:
+      c.execute("UPDATE schema_version SET version=4")
+
 def connect_readonly(path=None):
   """Open an existing database read-only (no migration, no reconcile). Used by offline tools such as
   render_timer_html.py --routine-id; the server applies migrations on startup."""
@@ -190,6 +204,7 @@ def init(c):
   c.commit()
   if _version(c)<2: _migrate_v2(c)
   if _version(c)<3: _migrate_v3(c)
+  if _version(c)<4: _migrate_v4(c)
   if _version(c)!=SCHEMA_VERSION: raise RuntimeError(f"unsupported schema version {_version(c)}")
   if c.execute("SELECT count(*) FROM exercises").fetchone()[0]==0: seed(c)
   c.commit()
