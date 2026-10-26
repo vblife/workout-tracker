@@ -15,7 +15,9 @@ button{font-size:17px;padding:9px 18px;margin:4px;border-radius:10px;border:1px 
 <button id="b">Start</button><button id="sk">Skip</button><button id="end">Finish</button><div id="msg"></div><div id="plan"></div>
 <script>
 const $=i=>document.getElementById(i),fmt=s=>Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
-let cfg={name:"HIIT",rounds:20,segments:[{kind:"work",seconds:40},{kind:"rest",seconds:20}],warmup_s:10,cooldown_s:60},hiitId=null;
+let cfg={name:"HIIT",rounds:20,segments:[{kind:"work",seconds:40},{kind:"rest",seconds:20}],warmup_s:10,cooldown_s:60,ready_s:0},hiitId=null;
+/* Optional get-ready countdown before the first interval: ready_s seconds (0-60), default 0 = none. */
+const readyS=()=>{const n=Math.round(+cfg.ready_s);return n>0?Math.min(n,60):0};
 let plan=[],pi=0,left=0,iv=null,elapsed=0,started=false,logged=false,rid=1,pending={},bridge=false,countdown=0,ac=null;
 function build(){plan=[];if(cfg.warmup_s)plan.push({kind:"warmup",seconds:cfg.warmup_s,round:0});
  for(let r=1;r<=cfg.rounds;r++)cfg.segments.forEach((s,j)=>{if(r==cfg.rounds&&j==cfg.segments.length-1&&s.kind=="rest")return;plan.push({...s,round:r})});
@@ -31,7 +33,7 @@ function beep(f=880,d=.12){try{ac=ac||new(window.AudioContext||window.webkitAudi
 function tick(){if(countdown){countdown--;beep(countdown?660:1320,countdown?.1:.25);draw();return}left--;elapsed++;if(left<=3&&left>0)beep();if(left<=0){next();return}draw()}
 function next(){pi++;beep(1320,.25);if(navigator.vibrate)navigator.vibrate(200);if(pi>=plan.length){stop();finish("completed");return}left=plan[pi].seconds;draw()}
 function stop(){clearInterval(iv);iv=null;$('b').textContent=logged?"Done":"Start"}
-async function start(){if(logged)return;if(iv){stop();$('b').textContent="Resume";return}if(!started){started=true;countdown=3;beep(660,.1)}
+async function start(){if(logged)return;if(iv){stop();$('b').textContent="Resume";return}if(!started){started=true;countdown=readyS();if(countdown)beep(660,.1)}
  iv=setInterval(tick,1000);$('b').textContent="Pause";draw();try{await navigator.wakeLock?.request("screen")}catch(e){}}
 function roundsDone(){if(pi>=plan.length)return cfg.rounds;const p=plan[pi];return Math.max(0,(p.round||0)-(p.kind=="work"||p.kind=="warmup"?1:0))}
 function finish(status){if(logged||!started)return;const rd=roundsDone();logged=true;stop();pi=plan.length;draw();$('b').disabled=true;

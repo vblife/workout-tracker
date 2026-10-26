@@ -33,7 +33,7 @@ The generator validates the config and injects it the same way `render_report_ht
 |---|---|---|
 | `label` (or `name`) | `Timer` | Title shown on the page and as the tab title |
 | `duration_s` | `60` | Single countdown, seconds or `m:ss` |
-| `ready_s` | `5` | Get-ready period before the first interval (0-60) |
+| `ready_s` | `0` | Optional get-ready period before the first interval (0-60); 0 = counting starts at once |
 | `intervals` | none | `[{"kind": "work"/"rest"/"warmup"/"cooldown"/"interval", "seconds": 40, "label": "Burpees"}]` |
 | `rounds`, `segments`, `warmup_s`, `cooldown_s` | none | A `hiit_timer` result; expanded like `hiit.html` (final rest of the last round skipped) |
 | `round_options` | none | With `segments`: round counts offered on the idle screen, e.g. `[10, 20]` (see Round selector) |
@@ -107,7 +107,7 @@ selector is hidden (and ignored); Reset shows it again. `?rounds=20` or `#rounds
 The choice is not written back to the URL, so a base64 config hash is never overwritten.
 
 Totals keep the skip-final-rest rule: `warmup + n*work + (n-1)*rest + cooldown`, plus the get-ready period.
-With 40/20 that is 9:40 for 10 rounds and 19:40 for 20 rounds (plus 5 s get ready).
+With 40/20 that is 9:40 for 10 rounds and 19:40 for 20 rounds (plus `ready_s` when a get-ready period is set; none by default).
 
 | CLI | Config | Result |
 |---|---|---|
@@ -151,8 +151,9 @@ One cue shape is used everywhere: **short, short, long**. The two short beeps pl
 boundary and the long beep starts exactly on 0, so it doubles as the countdown. There are no separate 3-2-1
 beeps.
 
-- Start: get-ready period (default 5 s); short, short, long as counting begins. With `ready_s: 0` only the
-  long beep plays at Start, because there is no time for the short beeps.
+- Start: by default (`ready_s: 0`) there is no get-ready period, counting starts at once, and only the long
+  beep plays at Start, because there is no time for the short beeps. With an optional `ready_s` (or `--ready N`,
+  1-60) a get-ready period plays first and ends with short, short, long as counting begins.
 - Every interval change in a sequence: short, short, long into the next interval, with a short vibration.
   Changes into rest or cool-down use the same shape at a lower pitch, so you can tell work from rest
   without looking.
@@ -172,7 +173,7 @@ played at gain 0.05, against 0.28-0.32 for the cue beeps.
 - Ticks sit on whole seconds from the start of each counting interval. A tick is skipped within 0.5 s of any
   cue beep, so ticks never collide with short, short, long. In a 40 s work interval you hear 37 ticks, then
   the two shorts and the long.
-- There are no ticks during the get-ready period: it is short (5 s by default) and already ends with its own
+- There are no ticks during the optional get-ready period (off by default): it already ends with its own
   short, short, long, so silence before Go keeps the start cue distinct.
 - `buildTicks(segs, cues)` is a pure function next to `buildCues`, and the ticks are pre-scheduled on the same
   `AudioContext` with the same horizon, top-up, and drift check. They keep playing with the screen off

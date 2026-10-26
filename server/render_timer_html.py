@@ -30,7 +30,7 @@ HIIT sessions with different ids share one cache entry. A "timer cache hit <key>
 Config keys (all optional):
   label        title shown on the page (hiit_timer "name" is accepted too)
   duration_s   single countdown length in seconds (default 60)
-  ready_s      get-ready period before the first interval, 0-60 (default 5)
+  ready_s      optional get-ready period before the first interval, 0-60 (default 0 = none)
   intervals    [{"kind": work|rest|warmup|cooldown|interval, "seconds": int, "label": str}]
   rounds, segments, warmup_s, cooldown_s, hiit_id
                the structured hiit_timer result; expanded into intervals the same
@@ -61,7 +61,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from render_report_html import render as _inject, safe_json  # noqa: E402
 
 DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "timer.html")
-DEFAULTS = {"label": "Timer", "duration_s": 60, "ready_s": 5, "lang": "en"}
+DEFAULTS = {"label": "Timer", "duration_s": 60, "ready_s": 0, "lang": "en"}
 KINDS = ("work", "rest", "warmup", "cooldown", "interval")
 LANGS = ("en", "zh")  # must match the STRINGS tables in ui/timer.html
 REMOVED_KEYS = ("strings",)  # per-label overrides were removed; fail loudly instead of ignoring them
@@ -456,7 +456,7 @@ def main(argv=None):
     p.add_argument("--config", help="timer config JSON file ('-' for stdin), e.g. a hiit_timer result")
     p.add_argument("--duration", help="single countdown length: seconds or m:ss")
     p.add_argument("--label")
-    p.add_argument("--ready", help="get-ready seconds before the first interval (default 5)")
+    p.add_argument("--ready", help="optional get-ready seconds before the first interval, 0-60 (default 0 = start counting at once)")
     p.add_argument("--work", help="work/rest rounds mode: work seconds per round (seconds or m:ss)")
     p.add_argument("--rest", help="rest seconds between rounds (the final rest is skipped)")
     p.add_argument("--rounds", help="round count, or a comma list like 10,20 to show a selector")
