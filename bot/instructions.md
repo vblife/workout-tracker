@@ -30,7 +30,7 @@ Meal-image analysis and inferred foods or portions remain ephemeral. USDA receiv
 
 ## Interfaces
 
-For period reports (`report` via `vblife-workout-report`), deliver a Grok Bot Page (Canvas) plus a short chat summary and link; do not attach report HTML. The scheduled daily report (about 20:30 user-local, today vs yesterday) and weekly report (Sunday 21:00 user-local, this week vs last week) use the same wide Page dashboard pattern. When MCP Apps is available, `report`, `show_progress`, and `hiit_timer` may still render host interfaces as a bonus. Never promise a dashboard or callback the client did not negotiate. HIIT countdown timers still use the HTML template path in `vblife-workout-hiit-session` when needed.
+For period reports (`report` via `vblife-workout-report`), deliver a Grok Bot Page (Canvas) plus a short chat summary and link; do not attach report HTML. The scheduled daily report (about 20:30 user-local, today vs yesterday) and weekly report (Sunday 21:00 user-local, this week vs last week) use the same wide Page dashboard pattern. When MCP Apps is available, `report`, `show_progress`, and `hiit_timer` may still render host interfaces as a bonus, and `guided_routine_timer` attaches a guided runner that logs each Done set and finishes the workout itself (`ui_auto_log: true`; do not ask for a summary). Never promise a dashboard or callback the client did not negotiate. HIIT countdown timers still use the HTML template path in `vblife-workout-hiit-session` when needed.
 
 ## Skills
 

@@ -8,9 +8,11 @@ HERE=os.path.dirname(os.path.abspath(__file__))
 NAME,VERSION="workout-bot","1.0.0"
 MIME="text/html;profile=mcp-app"; HIIT_URI="ui://workout/hiit.html"
 RMETA={"ui":{"prefersBorder":True,"csp":{"connectDomains":[],"resourceDomains":[]}},"openai/widgetDescription":"Configurable HIIT interval timer","openai/widgetPrefersBorder":True}
-PROG_URI="ui://workout/progress.html"; REPORT_URI="ui://workout/report.html"
-UI_FILES={HIIT_URI:"hiit.html",PROG_URI:"progress.html",REPORT_URI:"report.html"}
-TOOL_UI={"hiit_timer":HIIT_URI,"show_progress":PROG_URI,"report":REPORT_URI}
+PROG_URI="ui://workout/progress.html"; REPORT_URI="ui://workout/report.html"; GUIDED_URI="ui://workout/guided.html"
+# The guided runner view is the same self-contained page that render_timer_html.py writes for offline use.
+UI_FILES={HIIT_URI:"hiit.html",PROG_URI:"progress.html",REPORT_URI:"report.html",GUIDED_URI:"timer.html"}
+TOOL_UI={"hiit_timer":HIIT_URI,"show_progress":PROG_URI,"report":REPORT_URI,"guided_routine_timer":GUIDED_URI}
+APP_TOOL={"ui":{"visibility":["model","app"]}}  # tools a UI view may call through tools/call
 def _ui_html(uri):
   with open(os.path.join(HERE,"ui",UI_FILES[uri]),encoding="utf-8") as handle: return handle.read()
 def _uimeta(uri,inv,done): return {"ui":{"resourceUri":uri,"visibility":["model","app"]},"ui/resourceUri":uri,"openai/outputTemplate":uri,"openai/widgetAccessible":True,
@@ -41,7 +43,7 @@ TOOLS=[
     "tracking":{"type":"string","enum":["reps_weight","reps","duration","distance"]},"aliases":{"type":"array","items":{"type":"string"}}},["canonical","category"])},
  {"name":"log_sets","title":"Log sets","description":"Store one or more sets parsed from the user's message. Atomic: if any exercise is unknown/ambiguous nothing is saved and status=needs_confirmation with candidates. A first log starts a workout; more than 15 minutes of inactivity closes it. Returns e1RM (Epley) and PR flags.",
   "inputSchema":O({"sets":{"type":"array","items":SET_ITEM,"minItems":1},"performed_at":{"type":"string","description":"ISO time; a value with no offset is user-local (settings.timezone). Default now"},"notes":{"type":"string"},
-    "session_weight":{"type":"number","exclusiveMinimum":0},"weight_unit":{"type":"string","enum":["lb","kg"]},"planned_duration_min":{"type":"number","exclusiveMinimum":0}},["sets"])},
+    "session_weight":{"type":"number","exclusiveMinimum":0},"weight_unit":{"type":"string","enum":["lb","kg"]},"planned_duration_min":{"type":"number","exclusiveMinimum":0}},["sets"]),"_meta":APP_TOOL},
  {"name":"list_recent","title":"List recent sets","description":"Most recent sets, newest first (set_id usable with delete_set).",
   "inputSchema":O({"limit":{"type":"integer","minimum":1,"maximum":100,"default":10},"exercise":{"type":"string"}}),"annotations":{"readOnlyHint":True}},
  {"name":"delete_set","title":"Delete / undo set","description":"Delete a set by set_id, or the most recently logged set if set_id omitted (undo). Removes the session if it becomes empty.",
@@ -113,19 +115,20 @@ TOOLS.extend([
  {"name":"archive_routine","title":"Archive routine","description":"Archive a routine without breaking historical workout links.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",)),"annotations":{"destructiveHint":True}},
  {"name":"restore_routine","title":"Restore routine","description":"Restore an archived routine.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",))},
  {"name":"start_routine","title":"Start routine","description":"Start a saved routine by creating an independent active-workout snapshot. Never replace an existing active workout.","inputSchema":O({"routine_id":{"type":"integer"},"idempotency_key":{"type":"string"}},("routine_id",))},
- {"name":"guided_routine_timer","title":"Guided routine runner","description":"Start a saved standard routine (same rules as start_routine: never replaces an active workout) and return the guided-runner steps for server/render_timer_html.py --config: each set is a work step (count-up with Done, or a countdown when the item has target_duration_s) followed by a rest countdown (item rest_seconds, else default_rest_s), no rest after the last step. Log only the sets the user marks Done, using completion_handoff. HIIT routines are rejected: use hiit_timer.",
+ {"name":"guided_routine_timer","title":"Guided routine runner","description":"Start a saved standard routine (same rules as start_routine: never replaces an active workout) and run it set by set: each set is a work step (count-up with Done, or a countdown when the item has target_duration_s) followed by a rest countdown (item rest_seconds, else default_rest_s), no rest after the last step. MCP Apps clients (result has ui_auto_log=true): the attached runner logs each set the moment the user marks it Done (log_sets with performed_at) and calls finish_workout when the user ends or completes the routine, so do not render a page, ask for a summary, or log those sets again. Other clients: render the steps with server/render_timer_html.py --config and log only the sets the user marks Done, using completion_handoff. HIIT routines are rejected: use hiit_timer.",
   "inputSchema":O({"routine_id":{"type":"integer"},"lang":{"type":"string","enum":["en","zh"],"default":"en","description":"Exercise-name and UI language for the runner page"},
-    "default_rest_s":{"type":"integer","minimum":0,"maximum":3600,"default":90,"description":"Rest after a working set when the item has no rest_seconds"},"idempotency_key":{"type":"string"}},("routine_id",))},
+    "default_rest_s":{"type":"integer","minimum":0,"maximum":3600,"default":90,"description":"Rest after a working set when the item has no rest_seconds"},"idempotency_key":{"type":"string"}},("routine_id",)),
+  "_meta":_uimeta(GUIDED_URI,"Starting guided workout…","Guided runner ready")},
  {"name":"start_workout","title":"Start accepted plan","description":"Start an accepted conversational plan as an active snapshot; generating or showing a plan must not call this tool.","inputSchema":O({"mode":{"type":"string","enum":["conversational_plan"]},"title":{"type":"string"},"items":{"type":"array","items":SESSION_ITEM},"idempotency_key":{"type":"string"},
     "session_weight":{"type":"number","exclusiveMinimum":0},"weight_unit":{"type":"string","enum":["lb","kg"]},"planned_duration_min":{"type":"number","exclusiveMinimum":0}},("mode",))},
  {"name":"get_active_workout","title":"Resume active workout","description":"Return the one active workout, completed work, and pending items.","inputSchema":O({}),"annotations":{"readOnlyHint":True}},
  {"name":"add_workout_item","title":"Add active-workout item","description":"Add an ad-hoc item only to the active workout snapshot; the source routine is unchanged.","inputSchema":O({"item":ROUTINE_ITEM},("item",))},
  {"name":"replace_workout_item","title":"Replace active-workout item","description":"Pivot by replacing one active-workout item without changing the source routine.","inputSchema":O({"item_id":{"type":"integer"},"replacement":ROUTINE_ITEM},("item_id","replacement"))},
  {"name":"reorder_workout_items","title":"Reorder active-workout items","description":"Reorder every non-replaced item in the active workout snapshot.","inputSchema":O({"item_ids":{"type":"array","items":{"type":"integer"},"minItems":1}},("item_ids",))},
- {"name":"set_workout_item_status","title":"Update active-workout item","description":"Mark an item pending, completed, or skipped in the active workout snapshot.","inputSchema":O({"item_id":{"type":"integer"},"status":{"type":"string","enum":["pending","completed","skipped"]}},("item_id","status"))},
+ {"name":"set_workout_item_status","title":"Update active-workout item","description":"Mark an item pending, completed, or skipped in the active workout snapshot.","inputSchema":O({"item_id":{"type":"integer"},"status":{"type":"string","enum":["pending","completed","skipped"]}},("item_id","status")),"_meta":APP_TOOL},
  {"name":"move_set","title":"Move set to workout","description":"Correct timeout grouping by moving one logged set to another non-abandoned workout and recalculating both.","inputSchema":O({"set_id":{"type":"integer"},"target_session_id":{"type":"integer"}},("set_id","target_session_id"))},
  {"name":"merge_workouts","title":"Merge adjacent workouts","description":"Merge two adjacent completed workouts only after explicit confirmation; recalculates derived values.","inputSchema":O({"source_session_id":{"type":"integer"},"target_session_id":{"type":"integer"},"confirmed":{"type":"boolean","const":True}},("source_session_id","target_session_id","confirmed")),"annotations":{"destructiveHint":True}},
- {"name":"finish_workout","title":"Finish workout","description":"Finish the active workout immediately.","inputSchema":O({})},
+ {"name":"finish_workout","title":"Finish workout","description":"Finish the active workout immediately.","inputSchema":O({}),"_meta":APP_TOOL},
  {"name":"abandon_workout","title":"Abandon workout","description":"Abandon the active workout while preserving its history.","inputSchema":O({}),"annotations":{"destructiveHint":True}},
  {"name":"nutrition_status","title":"Nutrition estimation status","description":"Report whether USDA hybrid estimation is available and whether model-only mode was acknowledged. Never returns the key.","inputSchema":O({}),"annotations":{"readOnlyHint":True}},
  {"name":"search_usda","title":"Search USDA nutrients","description":"Search FoodData Central using an agent-produced text candidate only. Never send an image. Failure returns a model-only fallback.","inputSchema":O({"query":{"type":"string"}},("query",)),"annotations":{"readOnlyHint":True}},
@@ -145,16 +148,19 @@ TOOLS.extend([
 ])
 RESOURCES=[{"uri":HIIT_URI,"name":"hiit_timer_view","title":"HIIT Timer","description":"Configurable HIIT timer","mimeType":MIME,"_meta":RMETA},
  {"uri":PROG_URI,"name":"progress_view","title":"Progress chart","description":"Progress charts","mimeType":MIME,"_meta":{**RMETA,"openai/widgetDescription":"Workout progress chart"}},
- {"uri":REPORT_URI,"name":"report_view","title":"Workout report","description":"Period report","mimeType":MIME,"_meta":{**RMETA,"openai/widgetDescription":"Workout report"}}]
+ {"uri":REPORT_URI,"name":"report_view","title":"Workout report","description":"Period report","mimeType":MIME,"_meta":{**RMETA,"openai/widgetDescription":"Workout report"}},
+ {"uri":GUIDED_URI,"name":"guided_runner_view","title":"Guided routine runner","description":"Set-by-set runner that logs each Done set","mimeType":MIME,"_meta":{**RMETA,"openai/widgetDescription":"Guided routine runner that logs each set marked Done"}}]
 
-def _summary(name,r):
+def _summary(name,r,ui=False):
   if name=="log_sets":
     if r["status"]!="logged": return "Nothing saved — needs confirmation: "+json.dumps(r["problems"],ensure_ascii=False)
     return "Logged: "+"; ".join(f"{x['exercise']} {x['reps'] or ''}{' reps' if x['reps'] else ''}{(' @ '+str(x['weight'])+x['unit']) if x['weight'] is not None else ''}{' (PR!)' if x['is_pr'] else ''}" for x in r["logged"])
   if name=="hiit_timer":
     return f"HIIT timer ready (id {r['hiit_id']}): {r['rounds']} rounds × "+", ".join(f"{s.get('exercise') or s['kind']} {s['seconds']}s" for s in r["segments"])+f"; total {r['planned_seconds']//60}m{r['planned_seconds']%60:02d}s. Press Start."
   if name=="guided_routine_timer":
-    return f"Guided runner ready for workout #{r['session_id']} ({r['status']}): {r['work_sets']} sets from '{r['name']}'. Render it with render_timer_html.py --config."
+    head=f"Guided runner ready for workout #{r['session_id']} ({r['status']}): {r['work_sets']} sets from '{r['name']}'."
+    if ui: return head+" The runner is attached: it logs each set when the user taps Done and finishes the workout when they end it. Do not render an offline page, ask for a summary, or log these sets again."
+    return head+" Render it with render_timer_html.py --config."
   return None
 def call_tool(c,name,a):
   a=a or {}
@@ -252,10 +258,12 @@ class Server:
       try: r=call_tool(s.c,name,p.get("arguments"))
       except (UserError,TypeError,ValueError) as e:
         s.c.rollback(); return {"content":[{"type":"text","text":f"Error: {e}"}],"isError":True}
-      txt=_summary(name,r)
+      ui=s.ui_supported and name in TOOL_UI
+      if ui and name=="guided_routine_timer": r={**r,"ui_auto_log":True}
+      txt=_summary(name,r,ui)
       body=json.dumps(r,ensure_ascii=False)
       out={"content":[{"type":"text","text":(txt+"\n"+body) if txt else body}],"structuredContent":r}
-      if s.ui_supported and name in TOOL_UI: out["_meta"]={"ui":{"resourceUri":TOOL_UI[name]}}
+      if ui: out["_meta"]={"ui":{"resourceUri":TOOL_UI[name]}}
       return out
     raise NotImplementedError(meth)
   def respond(s,m):

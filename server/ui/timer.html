@@ -30,6 +30,9 @@ button#doneBtn{background:var(--start-bg);color:var(--start-fg);border-color:var
 #forBot{color:var(--muted);font-size:clamp(12px,3.6vw,16px);margin-top:1vh}
 #summary{text-align:left;color:var(--muted);background:var(--btn-bg);border:1px solid var(--btn-line);border-radius:8px;padding:8px;font-size:12px;max-width:100%;max-height:30vh;overflow:auto;white-space:pre-wrap;word-break:break-all;-webkit-user-select:text;user-select:text}
 #list[hidden],#summary[hidden],#forBot[hidden]{display:none}
+/* Inside an MCP Apps host the frame sizes to the content (ui/notifications/size-changed), so no full-height layout. */
+html.apps,html.apps body{height:auto}html.apps main{min-height:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style></head><body class="idle"><main>
 <div id="label">Timer</div><div id="phase"></div><div id="time">0:00</div><div id="sub"></div><div id="next"></div><div id="bar"><i></i></div>
 <div id="rsel" role="group" aria-labelledby="rselLbl" hidden><div id="rselLbl">Rounds</div><div class="rbtns" id="rbtns"></div></div>
@@ -41,6 +44,50 @@ button#doneBtn{background:var(--start-bg);color:var(--start-fg);border-color:var
 <script>
 (function(){
 "use strict";
+/* ---------- MCP Apps bridge (JSON-RPC over postMessage, the same protocol as ui/hiit.html) ----------
+   Used only when an MCP Apps host embeds this page as the guided_routine_timer UI resource
+   (ui://workout/guided.html). The host delivers the tool result (the guided config) with
+   ui/notifications/tool-result, and the guided runner calls log_sets / set_workout_item_status /
+   finish_workout through tools/call. The offline file:// page has no parent frame and sends nothing. */
+var APP=(function(){
+ var embedded=false;try{embedded=window.parent!==window}catch(e){embedded=true}
+ var api={embedded:embedded,on:false,config:null,error:null,onConfig:null,onTeardown:null,fixed:false},rid=1,pending={},last="",readyRes;
+ api.ready=new Promise(function(r){readyRes=r});
+ function openaiCall(){try{return!!(window.openai&&typeof window.openai.callTool==="function")}catch(e){return false}}
+ function send(m){try{window.parent.postMessage(m,"*")}catch(e){}}
+ function request(method,params,ms){var id=rid++;send({jsonrpc:"2.0",id:id,method:method,params:params});
+  return new Promise(function(res,rej){pending[id]={res:res,rej:rej};if(ms)setTimeout(function(){if(pending[id]){delete pending[id];rej(new Error("timeout"))}},ms)})}
+ function reply(id,result){send({jsonrpc:"2.0",id:id,result:result})}
+ function hostContext(c){if(c&&c.containerDimensions)api.fixed=Object.prototype.hasOwnProperty.call(c.containerDimensions,"height")}
+ function size(){if(!api.on||api.fixed)return;var d=document.documentElement,w=Math.ceil(d.scrollWidth),h=Math.ceil(d.scrollHeight),k=w+"x"+h;
+  if(k!==last){last=k;send({jsonrpc:"2.0",method:"ui/notifications/size-changed",params:{width:w,height:h}})}}
+ function result(p){if(api.config||api.error)return;
+  if(p&&p.isError){var c=p.content&&p.content[0];api.error=c&&c.text?String(c.text):"Error"}
+  else if(p&&p.structuredContent&&typeof p.structuredContent==="object")api.config=p.structuredContent;else return;
+  if(api.onConfig)api.onConfig()}
+ if(embedded)window.addEventListener("message",function(e){var m=e.data;if(!m||m.jsonrpc!=="2.0")return;
+  try{if(e.source&&e.source!==window.parent)return}catch(x){}
+  if(m.id!=null&&!m.method){var q=pending[m.id];if(q){delete pending[m.id];m.error?q.rej(m.error):q.res(m.result)}return}
+  if(m.method==="ui/notifications/tool-result")result(m.params);
+  else if(m.method==="ui/notifications/tool-cancelled"){if(!api.config&&!api.error){api.error=(m.params&&m.params.reason)||"Cancelled";if(api.onConfig)api.onConfig()}}
+  else if(m.method==="ui/notifications/host-context-changed")hostContext(m.params);
+  else if(m.method==="ui/resource-teardown"&&m.id!=null){var done=function(){reply(m.id,{})};Promise.resolve(api.onTeardown&&api.onTeardown()).then(done,done)}
+  else if(m.method==="ping"&&m.id!=null)reply(m.id,{})});
+ /* Tool calls go to the host; the result is a standard CallToolResult. */
+ api.callTool=function(name,args){if(api.on)return request("tools/call",{name:name,arguments:args},30000);
+  if(openaiCall())return Promise.resolve(window.openai.callTool(name,args));return Promise.reject(new Error("no MCP Apps host"))};
+ /* Best effort: lets the model see progress in later turns. Hosts that do not support it reply with an error. */
+ api.context=function(text,data){if(api.on)request("ui/update-model-context",{content:[{type:"text",text:text}],structuredContent:data},10000).catch(function(){})};
+ if(embedded)request("ui/initialize",{protocolVersion:"2026-01-26",appInfo:{name:"workout-guided",version:"1.0"},appCapabilities:{}},10000)
+  .then(function(r){api.on=true;hostContext(r&&r.hostContext);document.documentElement.classList.add("apps");
+   send({jsonrpc:"2.0",method:"ui/notifications/initialized",params:{}});readyRes(true);
+   if(window.ResizeObserver)try{new ResizeObserver(size).observe(document.body)}catch(e){}size();setInterval(size,1000)})
+  .catch(function(){readyRes(openaiCall())});
+ else readyRes(false);
+ return api})();
+/* boot(appCfg) runs the page once its config is known: at once for the offline page (config injected into
+   window.openai.toolOutput or given in the URL), or when the MCP Apps host sends the tool result. */
+function boot(APPCFG){
 /* Self-contained countdown timer (and, with mode "guided", a set-by-set routine runner). No network requests. Config comes from
    window.openai.toolOutput (injected by server/render_timer_html.py), then the
    URL query string, then the URL hash (base64url JSON or key=value pairs). */
@@ -49,11 +96,11 @@ var STRINGS={
  en:{start:"Start",pause:"Pause",resume:"Resume",reset:"Reset",skip:"Skip",ready:"Get ready",work:"Work",rest:"Rest",warmup:"Warm-up",cooldown:"Cool-down",interval:"",done:"Done!",next:"Next",round:"Round {r}/{n}",left:"{t} left",keepAwake:"Keep screen on",tick:"Tick",go:"Go",
   wlLock:"Screen stays on (wake lock)",wlOff:"Screen may turn off; audio cues are pre-scheduled",wlNone:"Keep-screen-on is not available here; leave the screen on for the most reliable cues",
   audioOff:"Sound is off or blocked; tap Resume to re-enable",total:"Total {t}",tellChat:"Tell the chat you finished HIIT #{id} so it can be logged",badLink:"Bad timer link; using defaults",rounds:"Rounds",roundsN:"{n} rounds",
-  setDone:"Done",setOf:"Set {i}/{n}",repsN:"{n} reps",hold:"Hold {t}",skipSet:"Skip set",end:"End workout",endConfirm:"Tap again to end",finished:"Workout finished",stopped:"Workout ended early",completedN:"{n}/{m} sets done",setsN:"{n} sets",noneDone:"No sets were marked Done",tellBot:"Tell Workout Bot you are done so it logs only the sets marked Done",forBot:"For Workout Bot"},
+  setDone:"Done",setOf:"Set {i}/{n}",repsN:"{n} reps",hold:"Hold {t}",skipSet:"Skip set",end:"End workout",endConfirm:"Tap again to end",finished:"Workout finished",stopped:"Workout ended early",completedN:"{n}/{m} sets done",setsN:"{n} sets",noneDone:"No sets were marked Done",tellBot:"Tell Workout Bot you are done so it logs only the sets marked Done",forBot:"For Workout Bot",saving:"Saving to Workout Bot\u2026",loggedSet:"Logged: {s}",logRetry:"Could not log {s}; retrying when you finish",autoDone:"Saved {n} of {m} sets to Workout Bot; workout finished",logFail:"{n} Done sets could not be saved; tell Workout Bot you are done so it logs them",finishFail:"Sets saved, but the workout could not be finished; tell Workout Bot you are done"},
  zh:{start:"\u5f00\u59cb",pause:"\u6682\u505c",resume:"\u7ee7\u7eed",reset:"\u91cd\u7f6e",skip:"\u8df3\u8fc7",ready:"\u51c6\u5907",work:"\u8bad\u7ec3",rest:"\u4f11\u606f",warmup:"\u70ed\u8eab",cooldown:"\u653e\u677e",interval:"",done:"\u5b8c\u6210!",next:"\u4e0b\u4e00\u4e2a",round:"\u7b2c {r}/{n} \u8f6e",left:"\u5269\u4f59 {t}",keepAwake:"\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae",tick:"\u6ef4\u7b54\u58f0",go:"\u5f00\u59cb",
   wlLock:"\u5c4f\u5e55\u4fdd\u6301\u5e38\u4eae (wake lock)",wlOff:"\u5c4f\u5e55\u53ef\u80fd\u5173\u95ed\uff1b\u63d0\u793a\u97f3\u5df2\u9884\u5148\u5b89\u6392",wlNone:"\u6b64\u5904\u65e0\u6cd5\u4fdd\u6301\u5c4f\u5e55\u5e38\u4eae\uff0c\u8bf7\u5c3d\u91cf\u4e0d\u8981\u9501\u5c4f",
   audioOff:"\u58f0\u97f3\u88ab\u5173\u95ed\u6216\u963b\u6b62\uff0c\u8bf7\u70b9\u201c\u7ee7\u7eed\u201d\u91cd\u65b0\u542f\u7528",total:"\u603b\u8ba1 {t}",tellChat:"\u8bf7\u5728\u804a\u5929\u4e2d\u544a\u8bc9\u6211\u5df2\u5b8c\u6210 HIIT #{id}\uff0c\u4ee5\u4fbf\u8bb0\u5f55",badLink:"\u94fe\u63a5\u65e0\u6548\uff0c\u4f7f\u7528\u9ed8\u8ba4\u8bbe\u7f6e",rounds:"\u7ec4\u6570",roundsN:"{n} \u7ec4",
-  setDone:"\u5b8c\u6210",setOf:"\u7b2c {i}/{n} \u7ec4",repsN:"{n} \u6b21",hold:"\u4fdd\u6301 {t}",skipSet:"\u8df3\u8fc7\u672c\u7ec4",end:"\u7ed3\u675f\u8bad\u7ec3",endConfirm:"\u518d\u70b9\u4e00\u6b21\u7ed3\u675f",finished:"\u8bad\u7ec3\u5b8c\u6210",stopped:"\u8bad\u7ec3\u5df2\u63d0\u524d\u7ed3\u675f",completedN:"\u5df2\u5b8c\u6210 {n}/{m} \u7ec4",setsN:"\u5171 {n} \u7ec4",noneDone:"\u6ca1\u6709\u6807\u8bb0\u5b8c\u6210\u7684\u7ec4",tellBot:"\u8bf7\u544a\u8bc9 Workout Bot \u4f60\u5df2\u7ec3\u5b8c\uff0c\u4ee5\u4fbf\u53ea\u8bb0\u5f55\u6807\u8bb0\u5b8c\u6210\u7684\u7ec4",forBot:"\u7ed9 Workout Bot \u7684\u8bb0\u5f55"}
+  setDone:"\u5b8c\u6210",setOf:"\u7b2c {i}/{n} \u7ec4",repsN:"{n} \u6b21",hold:"\u4fdd\u6301 {t}",skipSet:"\u8df3\u8fc7\u672c\u7ec4",end:"\u7ed3\u675f\u8bad\u7ec3",endConfirm:"\u518d\u70b9\u4e00\u6b21\u7ed3\u675f",finished:"\u8bad\u7ec3\u5b8c\u6210",stopped:"\u8bad\u7ec3\u5df2\u63d0\u524d\u7ed3\u675f",completedN:"\u5df2\u5b8c\u6210 {n}/{m} \u7ec4",setsN:"\u5171 {n} \u7ec4",noneDone:"\u6ca1\u6709\u6807\u8bb0\u5b8c\u6210\u7684\u7ec4",tellBot:"\u8bf7\u544a\u8bc9 Workout Bot \u4f60\u5df2\u7ec3\u5b8c\uff0c\u4ee5\u4fbf\u53ea\u8bb0\u5f55\u6807\u8bb0\u5b8c\u6210\u7684\u7ec4",forBot:"\u7ed9 Workout Bot \u7684\u8bb0\u5f55",saving:"\u6b63\u5728\u4fdd\u5b58\u5230 Workout Bot\u2026",loggedSet:"\u5df2\u8bb0\u5f55\uff1a{s}",logRetry:"{s} \u8bb0\u5f55\u5931\u8d25\uff0c\u7ed3\u675f\u65f6\u4f1a\u91cd\u8bd5",autoDone:"\u5df2\u4fdd\u5b58 {n}/{m} \u7ec4\u5230 Workout Bot\uff0c\u8bad\u7ec3\u5df2\u7ed3\u675f",logFail:"\u6709 {n} \u7ec4\u672a\u80fd\u4fdd\u5b58\uff0c\u8bf7\u544a\u8bc9 Workout Bot \u4f60\u5df2\u7ec3\u5b8c\uff0c\u4ee5\u4fbf\u8865\u8bb0",finishFail:"\u5404\u7ec4\u5df2\u4fdd\u5b58\uff0c\u4f46\u8bad\u7ec3\u672a\u80fd\u7ed3\u675f\uff0c\u8bf7\u544a\u8bc9 Workout Bot \u4f60\u5df2\u7ec3\u5b8c"}
 };
 var KINDS={work:1,rest:1,warmup:1,cooldown:1,interval:1};
 var DEF={label:"Timer",duration_s:60,ready_s:5,lang:"en",sound:true,speech:false,vibrate:true,keep_awake:true,tick:true};
@@ -69,6 +116,7 @@ function fromParams(ps){var o={},map={label:"label",duration:"duration_s",durati
  ps.forEach(function(v,k){if(map[k])o[map[k]]=v});if(o.duration_s!==undefined){o.duration_s=sec(o.duration_s);delete cfg.intervals;delete cfg.rounds;delete cfg.segments}if(o.ready_s!==undefined)o.ready_s=sec(o.ready_s);if(o.rounds!==undefined)o.rounds=parseInt(o.rounds,10)||0;return o}
 function loadConfig(){merge(DEF);
  try{if(window.openai&&window.openai.toolOutput)merge(window.openai.toolOutput)}catch(e){}
+ if(APPCFG)merge(APPCFG);
  try{if(location.search.length>1)merge(fromParams(new URLSearchParams(location.search)))}catch(e){}
  try{if(location.hash.length>1){var h=location.hash.slice(1),done=false;
   try{var s=h.replace(/-/g,"+").replace(/_/g,"/");while(s.length%4)s+="=";var j=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s),function(c){return c.charCodeAt(0)})));if(j&&typeof j==="object"){merge(j);done=true}}catch(e){}
@@ -247,9 +295,51 @@ function gCues(len,nextKind){var cues=[],ticks=[],tone=nextKind==="rest"?"rest":
  for(k=1;k<len-1e-6;k++){var near=false;for(j=0;j<cues.length;j++)if(Math.abs(cues[j].t-k)<0.5)near=true;if(!near)ticks.push(k)}
  return{cues:cues,ticks:ticks}}
 /* guided-core:end */
+/* guided-log:begin (pure; also exercised by test_guided_runner.py)
+   MCP Apps auto-log. gLogCall turns one Done entry into the tool call that records it: log_sets for one set
+   with performed_at = done_at, or set_workout_item_status completed for a loggable:false (activity-only)
+   step with a session item. gLogger runs those calls one at a time, in order, at most once per step (or
+   per item for status calls), and finish() waits for them, retries failed calls once (never a timed-out
+   one, which may have been saved), then calls finish_workout only if every Done entry was recorded. */
+function gLogCall(e){if(!e||typeof e!=="object")return null;
+ if(e.loggable===false)return e.session_item_id?{name:"set_workout_item_status",arguments:{item_id:e.session_item_id,status:"completed"}}:null;
+ var s={exercise:e.exercise};if(e.reps)s.reps=e.reps;if(e.weight!==null&&e.weight!==undefined){s.weight=e.weight;if(e.unit)s.unit=e.unit}
+ if(e.duration_s)s.duration_s=e.duration_s;if(e.distance_m!==null&&e.distance_m!==undefined)s.distance_m=e.distance_m;s.is_warmup=!!e.is_warmup;
+ if(e.session_item_id)s.session_item_id=e.session_item_id;var a={sets:[s]};if(e.done_at)a.performed_at=e.done_at;return{name:"log_sets",arguments:a}}
+function gKey(e,c){return c&&c.name==="set_workout_item_status"?"item:"+c.arguments.item_id:"step:"+e.step}
+function gText(r){var c=r&&Array.isArray(r.content)?r.content[0]:null;return c&&typeof c.text==="string"?c.text:""}
+/* A call succeeded: no isError, and log_sets really saved (status logged, not needs_confirmation). An
+   already-closed workout counts as finished. */
+function gToolOk(name,r){if(!r||typeof r!=="object")return false;var txt=gText(r),sc=r.structuredContent;
+ if(name==="finish_workout"&&r.isError)return/no active workout/.test(txt);if(r.isError)return false;
+ if(name==="log_sets")return sc&&typeof sc==="object"?sc.status==="logged":!/^(Nothing saved|Error)/.test(txt);return true}
+function gLogger(call,ok,hooks){hooks=hooks||{};var q=[],seen={},busy=false,done=[],failed=[],waiters=[],fin=null,finished=false;
+ function add(e){var c=gLogCall(e),k=gKey(e,c);if(!c||seen[k])return false;seen[k]=1;q.push({step:e.step,key:k,call:c,tries:0,unknown:false});pump();return true}
+ function pump(){if(busy)return;var j=q.shift();if(!j){waiters.splice(0).forEach(function(f){f()});return}busy=true;j.tries++;
+  Promise.resolve().then(function(){return call(j.call.name,j.call.arguments)}).then(function(r){return ok(j.call.name,r)},function(err){j.unknown=!!(err&&err.message==="timeout");return false})
+   .then(function(good){busy=false;if(good){done.push(j);if(hooks.logged)hooks.logged(j)}else{failed.push(j);if(hooks.failed)hooks.failed(j)}pump()})}
+ function drain(){return new Promise(function(r){if(!busy&&!q.length)r();else waiters.push(r)})}
+ function state(){return{finished:finished,logged:done.map(function(j){return j.step}),sets:done.filter(function(j){return j.call.name==="log_sets"}).length,
+  failed:failed.map(function(j){return{step:j.step,tool:j.call.name,unknown:j.unknown}})}}
+ function finish(){if(fin)return fin;fin=drain().then(function(){var again=failed.filter(function(j){return!j.unknown&&j.tries<2});
+   failed=failed.filter(function(j){return again.indexOf(j)<0});again.forEach(function(j){q.push(j)});pump();return drain()})
+  .then(function(){if(failed.length)return state();return Promise.resolve().then(function(){return call("finish_workout",{})})
+   .then(function(r){finished=ok("finish_workout",r);return state()},function(){return state()})});return fin}
+ return{add:add,drain:drain,finish:finish,state:state}}
+/* guided-log:end */
 function guidedRunner(){
  var steps=gPrep(cfg),works=steps.filter(function(x){return x.kind!=="rest"}).length;
  var phase="idle",resumeTo="",idx=0,t0=0,readyEnd=0,pausedAt=0,completed=[],ended="",armed=0;
+ /* MCP Apps: log each Done set as it happens (LOG is null on the offline page, which hands off by summary). */
+ var LOG=APP.embedded?gLogger(function(n,a){return APP.ready.then(function(on){if(!on)throw new Error("no MCP Apps host");return APP.callTool(n,a)})},gToolOk,
+  {logged:function(j){var e=byStep(j.step);if(j.call.name==="log_sets"&&phase!=="finished")$("msg").textContent=t("loggedSet",{s:entryText(e)});progress()},
+   failed:function(j){if(phase!=="finished")$("msg").textContent=t("logRetry",{s:entryText(byStep(j.step))})}}):null;
+ function byStep(n){for(var i=0;i<completed.length;i++)if(completed[i].step===n)return completed[i];return null}
+ function record(e){completed.push(e);if(LOG)LOG.add(e)}
+ function report(){return{workout_bot:"guided_routine",session_id:cfg.session_id===undefined?null:cfg.session_id,routine_id:cfg.routine_id===undefined?null:cfg.routine_id,
+   ended:ended,completed_sets:completed.length,total_sets:works,completed:completed}}
+ function progress(){if(!LOG)return;var st=LOG.state();APP.context(label+": "+st.sets+"/"+works+" sets logged"+(phase==="finished"?(st.finished?", workout finished":", not finished"):""),{guided_runner:report(),auto_log:st})}
+ APP.onTeardown=function(){return LOG?Promise.race([LOG.drain(),new Promise(function(r){setTimeout(r,5000)})]):null};
  function clock(){return phase==="paused"?pausedAt:now()}
  function title(s){if(!s)return"";var k=s.kind==="work"?"":t(s.kind);return k?k+" \u00b7 "+s.label:s.label}
  function presc(s){var p=[];if(!s||s.kind==="rest")return"";if(s.sets>1)p.push(t("setOf",{i:s.set_index,n:s.sets}));
@@ -269,8 +359,8 @@ function guidedRunner(){
  function begin(){ambientAudio();ensureAudio();if(ac)ac.onstatechange=function(){if(phase==="step"||phase==="ready")schedule();status()};
   running=true;acquireAwake();if(ready>0){phase="ready";readyEnd=now()+ready*1000;schedule();draw()}else enter(0,now())}
  function catchUp(){var n=now();if(phase==="ready"&&n>=readyEnd)enter(0,readyEnd);
-  if(phase!=="step")return;var r=gCatchUp(steps,idx,t0,n);if(r.idx!==idx){completed=completed.concat(r.done);enter(r.idx,r.t0)}}
- function markDone(){catchUp();if(phase!=="step")return;var s=steps[idx],n=now();if(s.kind!=="rest")completed.push(gEntry(s,(n-t0)/1000,false,n));enter(idx+1,n)}
+  if(phase!=="step")return;var r=gCatchUp(steps,idx,t0,n);if(r.idx!==idx){r.done.forEach(record);enter(r.idx,r.t0)}}
+ function markDone(){catchUp();if(phase!=="step")return;var s=steps[idx],n=now();if(s.kind!=="rest")record(gEntry(s,(n-t0)/1000,false,n));enter(idx+1,n)}
  function skipSet(){catchUp();if(phase!=="step"||steps[idx].kind==="rest")return;var j=idx+1;if(steps[j]&&steps[j].kind==="rest")j++;enter(j,now())}
  function pauseToggle(){if(phase==="idle"){begin();return}
   if(phase==="ready"||phase==="step"){resumeTo=phase;pausedAt=now();phase="paused";running=false;clearScheduled();releaseAwake();if(SPEECH&&window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}}
@@ -278,13 +368,21 @@ function guidedRunner(){
   status();draw()}
  function endTap(){if(phase==="idle"||phase==="finished")return;if(armed&&now()-armed<4000){finish("ended_early");return}armed=now();draw();setTimeout(draw,4100)}
  function showSummary(){var ol=$("list");ol.innerHTML="";
-  completed.forEach(function(e){var li=document.createElement("li"),p=presc({kind:"work",sets:e.sets,set_index:e.set_index,reps:e.reps,weight:e.weight,unit:e.unit,duration_s:e.duration_s,distance_m:e.distance_m});
-   li.textContent=title({kind:e.is_warmup?"warmup":"work",label:e.label})+(p?" \u00b7 "+p:"");ol.appendChild(li)});
+  completed.forEach(function(e){var li=document.createElement("li");li.textContent=entryText(e);ol.appendChild(li)});
   if(!completed.length){var li=document.createElement("li");li.textContent=t("noneDone");ol.appendChild(li)}
-  ol.hidden=false;$("msg").textContent=t("tellBot");$("forBot").hidden=false;$("forBot").textContent=t("forBot");
-  var data={workout_bot:"guided_routine",session_id:cfg.session_id===undefined?null:cfg.session_id,routine_id:cfg.routine_id===undefined?null:cfg.routine_id,
-   ended:ended,completed_sets:completed.length,total_sets:works,completed:completed};
-  var pre=$("summary");pre.textContent=JSON.stringify(data,null,1);pre.hidden=false;document.body.setAttribute("data-guided-summary",JSON.stringify(data))}
+  ol.hidden=false;var data=report();document.body.setAttribute("data-guided-summary",JSON.stringify(data));
+  if(!LOG){handoff(data,"tellBot");return}
+  /* MCP Apps: log any pending Done sets, then finish_workout. Never asks; skipped or unreached sets are never logged. */
+  $("msg").textContent=t("saving");
+  APP.ready.then(function(on){if(!on){handoff(data,"tellBot");return}
+   LOG.finish().then(function(st){data.auto_log=st;document.body.setAttribute("data-guided-summary",JSON.stringify(data));progress();
+    if(st.finished){$("msg").textContent=t("autoDone",{n:st.sets,m:works})}
+    else handoff(data,st.failed.length?"logFail":"finishFail",{n:st.failed.length})})})}
+ /* Offline fallback (or an auto-log failure): the user hands the summary to Workout Bot. */
+ function handoff(data,key,vars){$("msg").textContent=t(key,vars);$("forBot").hidden=false;$("forBot").textContent=t("forBot");
+  var pre=$("summary");pre.textContent=JSON.stringify(data,null,1);pre.hidden=false}
+ function entryText(e){if(!e)return"";var p=presc({kind:"work",sets:e.sets,set_index:e.set_index,reps:e.reps,weight:e.weight,unit:e.unit,duration_s:e.duration_s,distance_m:e.distance_m});
+  return title({kind:e.is_warmup?"warmup":"work",label:e.label})+(p?" \u00b7 "+p:"")}
  function draw(){if(phase!=="idle"&&phase!=="finished")catchUp();var b=document.body,s=steps[idx],n=clock(),st=$("start"),dn=$("doneBtn"),sk=$("skip"),rs=$("reset");
   var view=phase==="paused"?resumeTo:phase;
   b.className=phase==="idle"?"idle":phase==="finished"?"done":phase==="paused"?"paused":view==="ready"?"ready":s.kind;
@@ -313,7 +411,7 @@ function guidedRunner(){
  document.title=label;document.documentElement.lang=LANG;$("awakeLbl").textContent=t("keepAwake");$("tickLbl").textContent=t("tick");
  if(!steps.length){$("msg").textContent=t("badLink")}
  setInterval(draw,200);draw();
- window.__guided={steps:steps,done:markDone,skip:skipSet,toggle:pauseToggle,end:endTap,state:function(){return{phase:phase,idx:idx,completed:completed.slice(),ended:ended}}};
+ window.__guided={steps:steps,done:markDone,skip:skipSet,toggle:pauseToggle,end:endTap,state:function(){return{phase:phase,idx:idx,completed:completed.slice(),ended:ended,auto_log:LOG?LOG.state():null}}};
 }
 if(cfg.mode==="guided"){guidedRunner();return}
 $("start").onclick=toggle;$("reset").onclick=reset;$("skip").onclick=skip;
@@ -325,5 +423,17 @@ document.title=label;document.documentElement.lang=LANG;$("start").textContent=t
 if(msgs.length)$("msg").textContent=t(msgs[0]);
 setInterval(tick,200);draw();
 window.__timer={get segs(){return segs},get cues(){return cues},get ticks(){return ticks},tickOn:function(){return tickOn},get total(){return T},get rounds(){return rounds},roundOptions:RO,pick:pickRounds,cfg:cfg,labels:L,state:function(){return{started:started,running:running,finished:finished,elapsed:elapsed(),seg:segAt(elapsed()),awake:awakeMode,audio:ac&&ac.state,scheduled:nodes.length}}};
+}
+/* ---------- start ---------- */
+var booted=false;
+function go(c){if(booted)return;booted=true;boot(c)}
+function localConfig(){try{return!!(window.openai&&window.openai.toolOutput)||location.search.length>1||location.hash.length>1}catch(e){return false}}
+if(!APP.embedded||localConfig())go(null);
+else{
+ APP.onConfig=function(){if(APP.config)go(APP.config);else if(!booted){$0("label").textContent="Workout Bot";$0("msg").textContent=APP.error}};
+ APP.ready.then(function(on){if(!on&&!booted)go(null)});
+ window.addEventListener("openai:set_globals",function(){if(localConfig())go(null)});
+}
+function $0(i){return document.getElementById(i)}
 })();
 </script></body></html>

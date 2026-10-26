@@ -98,7 +98,7 @@ class ReportsUITest(unittest.TestCase):
         init = ui.handle({"method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {"extensions": {"io.modelcontextprotocol/ui": {}}}}})
         self.assertIn("resources", init["capabilities"])
         resources = ui.handle({"method": "resources/list", "params": {}})["resources"]
-        self.assertEqual({item["uri"] for item in resources}, {"ui://workout/hiit.html", "ui://workout/progress.html", "ui://workout/report.html"})
+        self.assertEqual({item["uri"] for item in resources}, {"ui://workout/hiit.html", "ui://workout/progress.html", "ui://workout/report.html", "ui://workout/guided.html"})
         for item in resources:
             html = ui.handle({"method": "resources/read", "params": {"uri": item["uri"]}})["contents"][0]["text"]
             self.assertIn("color-scheme", html)
