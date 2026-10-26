@@ -66,6 +66,38 @@ work interval that is followed by rest, the "Next" line names the upcoming exerc
 "下一个: ..."). During rest it shows the next work interval and its length, as before. All other behavior
 (theme, cues, tick, keep-alive, language) is unchanged.
 
+## Guided routine runner (standard routines)
+
+`"mode": "guided"` turns the same template into a set-by-set runner for a saved standard routine. The config
+is the `guided_routine_timer` result (`--config guided.json`), or `--routine-id N --guided` for a read-only
+preview that starts no workout (`--default-rest SECONDS` changes the 90 s default; `--rounds` is rejected).
+
+- **Steps.** Each item becomes `target_sets` work steps (1 when unset). A rest step follows each set: the
+  item's `rest_seconds` (0 = none), otherwise the default (90 s, `default_rest_s` / `--default-rest`).
+  Warm-up and cool-down items (named so in `activity_name` or `notes`, e.g. "Treadmill warm-up", "Stretch")
+  rest only when they set `rest_seconds` themselves. There is no rest after the final step.
+- **Clock.** A work step counts down only when the item has `target_duration_s` (it beeps short, short, long and
+  counts as done when it reaches 0). Every other work step counts up from 0:00 until the big **Done** button is
+  tapped. Rests count down and move on by themselves; **Next** ends a rest early. **Skip set** skips the set
+  and its rest. **Pause** freezes the clock. **End workout** needs a second tap within 4 s.
+- **Finish.** The finish screen lists only the sets marked Done (or holds that reached 0), with "N/M sets done",
+  and a JSON summary (`<pre id="summary">` and `body[data-guided-summary]`):
+  `{"workout_bot": "guided_routine", "session_id", "routine_id", "ended": "finished" | "ended_early",
+  "completed_sets", "total_sets", "completed": [{exercise, set_index, reps, weight, unit, duration_s,
+  distance_m, is_warmup, loggable, session_item_id, elapsed_s, done_at, ...}]}`. For a timed hold, `duration_s`
+  is the seconds actually held (capped at the target); for an untimed step with no reps or distance it is the
+  elapsed time.
+- **Logging.** The page makes no network calls. `guided_routine_timer` already started the workout
+  (`start_routine`); the bot then calls `log_sets` only for the completed entries, one call per set in order
+  with `performed_at = done_at` and the entry's `session_item_id` (see `completion_handoff`), and
+  `finish_workout`. Backdating matters because an active workout closes after 15 minutes without logged
+  activity.
+- **Cache.** `session_id` and the per-step `session_item_id`s (stored as a top-level `session_item_ids` list)
+  are per-run fields like `hiit_id`: they are left out of the cache key and patched into the out file, so
+  starting the same routine again reuses the cached page.
+
+Cues, tick, keep-alive, wake lock, theme, and the en/zh language rule are shared with countdown mode.
+
 ## Round selector
 
 For work/rest rounds (`segments` + `rounds`, one exercise per round), `round_options` lets the user pick the

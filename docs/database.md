@@ -26,6 +26,9 @@ This step is additive and idempotent:
 - `workout_routines.round_options_json` is an optional JSON list used by the timer's round selector.
 - `workout_routine_items.work_seconds` (1-3600) and `rest_seconds` (0-3600) are optional. When unset on a HIIT
   routine, reads use 40 and 20, or `target_duration_s` for work.
+- `rest_seconds` is also accepted on standard items: it is the rest after each set in the guided routine runner
+  (`guided_routine_timer`), which uses 90 s when it is unset. `work_seconds` stays HIIT-only; a standard item's
+  timed hold is `target_duration_s`. No schema change: the column already exists.
 
 Each `ALTER TABLE` runs only if its column is missing. No column, row, or existing value is dropped or
 rewritten.

@@ -17,6 +17,8 @@ Usage:
   python server/render_timer_html.py out.html --work 40 --rest 20 --rounds 10,20 --label "HIIT 40/20"
   python server/render_timer_html.py out.html --routine-id 3 --label "Circuit"   # saved hiit routine (read-only)
   python server/render_timer_html.py out.html --duration 5:00 --label "5-minute timer" --cache-dir /workspace/timer-cache
+  python server/render_timer_html.py out.html --config guided.json --cache-dir /workspace/timer-cache   # guided_routine_timer result
+  python server/render_timer_html.py out.html --routine-id 4 --guided --default-rest 120   # saved standard routine (read-only preview)
 
 Caching (--cache-dir DIR, or env WORKOUT_TIMER_CACHE): the rendered HTML is stored as
 DIR/<key>.html, where key is a sha256 prefix of the template plus the normalized config
@@ -35,9 +37,18 @@ Config keys (all optional):
                way hiit.html does (the final rest of the last round is skipped)
   round_options  e.g. [10, 20]: with segments, shows a round-count selector on the
                idle screen; rounds is the default and must be one of the options
+  mode         "guided": a set-by-set routine runner instead of a countdown (see below)
   lang         UI language: "en" (default) or "zh"; spoken cues follow it
   sound, speech, vibrate, keep_awake, tick   booleans (defaults true, false, true, true, true);
                tick false removes the soft once-per-second tick and its on-page toggle
+
+Guided mode ("mode": "guided", e.g. a guided_routine_timer result, or --routine-id N --guided):
+  steps        ordered [{"kind": work|warmup|cooldown, "label", "exercise", "reps", "weight", "unit",
+               "duration_s", "set_index", "sets", ...} or {"kind": "rest", "seconds": int}]. A work step
+               counts up from 0 until Done, or counts down from duration_s (timed hold; Done still allowed).
+               Rest counts down and advances by itself; trailing rests are dropped.
+  session_id   active workout id; with each step's session_item_id it is not part of the cache key and is
+               patched into the out file like hiit_id
 """
 import argparse
 import hashlib
@@ -60,6 +71,8 @@ MAX_SECONDS = 86400
 MAX_INTERVALS = 2000
 MAX_ROUNDS = 100
 MAX_ROUND_OPTIONS = 6
+GUIDED_WORK_KINDS = ("work", "warmup", "cooldown")
+RUN_KEYS = ("hiit_id", "session_id", "session_item_ids")  # per-run values: kept out of the cache key
 CACHE_KEY_LEN = 32
 INJECT_PREFIX = "<script>window.openai={toolOutput:"  # written by render_report_html.render
 INJECT_SUFFIX = "};</script>"
@@ -148,6 +161,78 @@ def expand_hiit(cfg):
     return out
 
 
+def _opt_int(value, name, minimum=0, maximum=100000):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be a whole number {minimum}-{maximum} (got {value!r})")
+    return value
+
+
+def _opt_num(value, name):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise ValueError(f"{name} must be a number >= 0 (got {value!r})")
+    return value
+
+
+def normalize_guided(config, out):
+    """Guided routine runner: validate steps; split per-run ids (session_item_id) into session_item_ids."""
+    steps = config.get("steps")
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("guided mode needs a non-empty steps list")
+    clean, item_ids = [], []
+    for step in steps:
+        if not isinstance(step, dict):
+            raise ValueError("each step must be an object")
+        kind = step.get("kind", "work")
+        if kind == "rest":
+            seconds = parse_seconds(step.get("seconds"), "rest seconds", minimum=0, maximum=3600)
+            if seconds:
+                clean.append({"kind": "rest", "seconds": seconds})
+                item_ids.append(None)
+            continue
+        if kind not in GUIDED_WORK_KINDS:
+            raise ValueError("step kind must be one of: rest, " + ", ".join(GUIDED_WORK_KINDS))
+        label = _label(step.get("label") or step.get("exercise"))
+        if not label:
+            raise ValueError("each work step needs a label or exercise")
+        duration = step.get("duration_s")
+        duration = None if duration in (None, 0) else parse_seconds(duration, "step duration_s", maximum=3600)
+        unit = step.get("unit")
+        if unit not in (None, "lb", "kg"):
+            raise ValueError("step unit must be lb or kg")
+        weight = _opt_num(step.get("weight"), "step weight")
+        clean.append({
+            "kind": kind, "label": label, "exercise": _label(step.get("exercise")) or label,
+            "set_index": _opt_int(step.get("set_index"), "set_index", 1, 1000) or 1,
+            "sets": _opt_int(step.get("sets"), "sets", 1, 1000) or 1,
+            "reps": _opt_int(step.get("reps"), "reps", 1, 10000),
+            "weight": weight, "unit": (unit or "kg") if weight is not None else None,
+            "duration_s": duration, "distance_m": _opt_num(step.get("distance_m"), "distance_m"),
+            "notes": _label(step.get("notes")),
+            "timer": "countdown" if duration else "countup",
+            "is_warmup": bool(step.get("is_warmup", kind == "warmup")),
+            "loggable": bool(step.get("loggable", True)),
+        })
+        item_ids.append(_opt_int(step.get("session_item_id"), "session_item_id", 1, 2**62))
+    while clean and clean[-1]["kind"] == "rest":  # no rest after the final step
+        clean.pop()
+        item_ids.pop()
+    if len(clean) > MAX_INTERVALS:
+        raise ValueError(f"at most {MAX_INTERVALS} steps")
+    out["mode"] = "guided"
+    out["steps"] = clean
+    if config.get("routine_id") is not None:
+        out["routine_id"] = _opt_int(config["routine_id"], "routine_id", 1, 2**62)
+    if config.get("session_id") is not None:
+        out["session_id"] = _opt_int(config["session_id"], "session_id", 1, 2**62)
+    if any(x is not None for x in item_ids):
+        out["session_item_ids"] = item_ids
+    return out
+
+
 def normalize_config(config):
     """Validate a timer config and return the explicit form injected into the template."""
     if config is None:
@@ -164,6 +249,17 @@ def normalize_config(config):
     for key in REMOVED_KEYS:
         if key in config:
             raise ValueError(f"'{key}' is not supported: pick the UI language with lang ({', '.join(LANGS)})")
+    mode = config.get("mode")
+    if mode not in (None, "timer", "guided"):
+        raise ValueError(f"mode must be timer or guided (got {mode!r})")
+    if mode == "guided":
+        normalize_guided(config, out)
+        for flag in FLAGS:
+            if flag in config:
+                if not isinstance(config[flag], bool):
+                    raise ValueError(f"{flag} must be true or false")
+                out[flag] = config[flag]
+        return out
     options = None
     if config.get("round_options") is not None:
         options = parse_round_options(config["round_options"])
@@ -228,7 +324,8 @@ def normalize_config(config):
 
 def cjk_labels(config):
     """Labels (title and interval labels) in a normalized config that contain CJK characters."""
-    labels = [config.get("label")] + [x.get("label") for x in config.get("intervals", []) + config.get("segments", [])]
+    labels = [config.get("label")] + [x.get("label") for x in config.get("intervals", []) + config.get("segments", [])
+                                      + config.get("steps", [])]
     return [x for x in dict.fromkeys(labels) if x and CJK.search(x)]
 
 
@@ -236,14 +333,17 @@ def render(config, template_html):
     return _inject(normalize_config(config), template_html)
 
 
-def _without_hiit_id(normalized):
-    return {k: v for k, v in normalized.items() if k != "hiit_id"}
+def _without_run_fields(normalized):
+    return {k: v for k, v in normalized.items() if k not in RUN_KEYS}
+
+
+_without_hiit_id = _without_run_fields  # older name
 
 
 def fingerprint(normalized, template_html):
-    """Cache key: sha256 of the template plus the normalized config, ignoring hiit_id."""
+    """Cache key: sha256 of the template plus the normalized config, ignoring per-run ids (hiit_id, session ids)."""
     template_bytes = template_html.encode("utf-8") if isinstance(template_html, str) else template_html
-    config = json.dumps(_without_hiit_id(normalized), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    config = json.dumps(_without_run_fields(normalized), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     digest = hashlib.sha256()
     digest.update(template_bytes)
     digest.update(b"\0")
@@ -255,8 +355,8 @@ def cache_path(cache_dir, key):
     return os.path.join(cache_dir, f"{key}.html")
 
 
-def apply_hiit_id(html, hiit_id):
-    """Set (or, for None, remove) hiit_id in the injected config of a rendered timer page."""
+def apply_run_fields(html, fields):
+    """Set (or, for None values, remove) per-run keys in the injected config of a rendered timer page."""
     start = html.find(INJECT_PREFIX)
     if start < 0:
         raise ValueError("timer HTML has no injected config")
@@ -266,35 +366,45 @@ def apply_hiit_id(html, hiit_id):
         raise ValueError("timer HTML has an unterminated injected config")
     # safe_json only adds \uXXXX escapes, which json.loads reads back unchanged.
     config = json.loads(html[body:end])
-    if hiit_id is None:
-        config.pop("hiit_id", None)
-    else:
-        config["hiit_id"] = hiit_id
+    for key, value in fields.items():
+        if value is None:
+            config.pop(key, None)
+        else:
+            config[key] = value
     return html[:body] + safe_json(config) + html[end:]
+
+
+def apply_hiit_id(html, hiit_id):
+    """Set (or, for None, remove) hiit_id in the injected config of a rendered timer page."""
+    return apply_run_fields(html, {"hiit_id": hiit_id})
 
 
 def render_cached(normalized, template_html, cache_dir):
     """Return (html, key, hit) for a normalized config, reusing cache_dir/<key>.html when present.
 
-    The cache file never contains hiit_id; the returned html carries normalized's hiit_id, if any.
+    The cache file never contains per-run ids (RUN_KEYS); the returned html carries normalized's, if any.
     """
     key = fingerprint(normalized, template_html)
     path = cache_path(cache_dir, key)
-    hiit_id = normalized.get("hiit_id")
+    run = {k: normalized.get(k) for k in RUN_KEYS}
     try:
         with open(path, encoding="utf-8") as f:
             cached = f.read()
-        return apply_hiit_id(cached, hiit_id), key, True
+        return apply_run_fields(cached, run), key, True
     except (OSError, ValueError):
         pass  # missing or unreadable entry: render and overwrite it
-    shared = _inject(_without_hiit_id(normalized), template_html)
+    shared = _inject(_without_run_fields(normalized), template_html)
     os.makedirs(cache_dir, exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(shared)
     os.replace(tmp, path)
-    html = shared if hiit_id is None else _inject(normalized, template_html)
+    html = shared if all(v is None for v in run.values()) else _inject(normalized, template_html)
     return html, key, False
+
+
+def routine_is_standard(message):
+    return "is a standard routine" in message
 
 
 def _routine_config(p, a):
@@ -318,8 +428,20 @@ def _routine_config(p, a):
     except (FileNotFoundError, RuntimeError, sqlite3.Error) as e:
         p.error(str(e))
     try:
-        cfg = core.routine_hiit_config(routines.get_routine(c, a.routine_id), lang=a.lang or "en", rounds=rounds)
+        routine = routines.get_routine(c, a.routine_id)
+        if a.guided:
+            if rounds is not None:
+                p.error("--rounds does not apply to --guided")
+            rest = routines.GUIDED_DEFAULT_REST_SECONDS if a.default_rest is None else parse_seconds(a.default_rest, "--default-rest", minimum=0, maximum=3600)
+            steps = routines.guided_steps(routine, rest, a.lang or "en", core.display_unit(c))
+            return {"mode": "guided", "label": routine["name"], "routine_id": routine["routine_id"], "steps": steps}
+        cfg = core.routine_hiit_config(routine, lang=a.lang or "en", rounds=rounds)
     except core.UserError as e:
+        message = str(e)
+        if routine_is_standard(message):
+            message += " (or pass --guided for the set-by-set routine runner)"
+        p.error(message)
+    except ValueError as e:
         p.error(str(e))
     finally:
         c.close()
@@ -341,6 +463,9 @@ def main(argv=None):
     p.add_argument("--default-rounds", help="default for a --rounds list (default: the first value)")
     p.add_argument("--routine-id", type=int, help="build the timer from a saved hiit routine (read-only database access)")
     p.add_argument("--db", help="workout database for --routine-id (default: $WORKOUT_DB, else the server default)")
+    p.add_argument("--guided", action="store_true",
+                   help="with --routine-id: build the guided set-by-set runner from a saved standard routine (no workout is started)")
+    p.add_argument("--default-rest", help="with --guided: rest after a set when the item has no rest_seconds (default 90)")
     p.add_argument("--no-tick", dest="tick", action="store_false", default=None,
                    help="remove the soft once-per-second tick and its toggle (same as \"tick\": false)")
     p.add_argument("--lang", choices=LANGS, help="UI language (default en)")
@@ -361,6 +486,10 @@ def main(argv=None):
             p.error(f"--config is not valid JSON: {e}")
         if not isinstance(config, dict):
             p.error("--config must be a JSON object")
+    if (a.guided or a.default_rest is not None) and a.routine_id is None:
+        p.error("--guided and --default-rest are only used with --routine-id")
+    if a.default_rest is not None and not a.guided:
+        p.error("--default-rest needs --guided")
     if a.routine_id is not None:
         if a.config or a.duration is not None or a.work is not None or a.rest is not None or a.default_rounds is not None:
             p.error("--routine-id cannot be combined with --config, --duration, --work, --rest or --default-rounds")
@@ -368,7 +497,7 @@ def main(argv=None):
     elif a.db is not None:
         p.error("--db is only used with --routine-id")
     if a.duration is not None:
-        for key in ("intervals", "segments", "rounds", "warmup_s", "cooldown_s"):
+        for key in ("intervals", "segments", "rounds", "warmup_s", "cooldown_s", "mode", "steps"):
             config.pop(key, None)
         config["duration_s"] = a.duration
     rounds_mode = a.routine_id is None and any(v is not None for v in (a.work, a.rest, a.rounds, a.default_rounds))
@@ -382,7 +511,7 @@ def main(argv=None):
             segments = [{"kind": "work", "seconds": parse_seconds(a.work, "--work")}]
             if a.rest is not None:
                 segments.append({"kind": "rest", "seconds": parse_seconds(a.rest, "--rest")})
-            for key in ("intervals", "segments", "rounds", "round_options", "warmup_s", "cooldown_s", "duration_s"):
+            for key in ("intervals", "segments", "rounds", "round_options", "warmup_s", "cooldown_s", "duration_s", "mode", "steps"):
                 config.pop(key, None)
             config.update({"segments": segments, "warmup_s": 0, "cooldown_s": 0})
             if len(rounds) == 1:

@@ -84,7 +84,7 @@ ROUTINE_ITEM=O({"position":{"type":"integer","minimum":1},"exercise":{"type":"st
 SESSION_ITEM=ROUTINE_ITEM
 HIIT_ROUTINE_ITEM={**ROUTINE_ITEM,"properties":{**ROUTINE_ITEM["properties"],
   "work_seconds":{"type":"integer","minimum":1,"maximum":3600,"description":"hiit routines only: work interval for this exercise (default 40, or target_duration_s)"},
-  "rest_seconds":{"type":"integer","minimum":0,"maximum":3600,"description":"hiit routines only: rest after this exercise (default 20; 0 = no rest)"}}}
+  "rest_seconds":{"type":"integer","minimum":0,"maximum":3600,"description":"Rest after this exercise (0 = no rest). hiit: default 20. standard: rest after each set in guided_routine_timer (default 90)"}}}
 ROUTINE_TYPE={"type":"string","enum":["standard","hiit"]}
 ROUTINE_ROUNDS={"routine_type":{**ROUTINE_TYPE,"description":"hiit routines can be timed with hiit_timer(routine_id); default standard"},
   "rounds":{"type":"integer","minimum":1,"maximum":100,"description":"hiit only: circuit repeats (default 1 pass)"},
@@ -113,6 +113,9 @@ TOOLS.extend([
  {"name":"archive_routine","title":"Archive routine","description":"Archive a routine without breaking historical workout links.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",)),"annotations":{"destructiveHint":True}},
  {"name":"restore_routine","title":"Restore routine","description":"Restore an archived routine.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",))},
  {"name":"start_routine","title":"Start routine","description":"Start a saved routine by creating an independent active-workout snapshot. Never replace an existing active workout.","inputSchema":O({"routine_id":{"type":"integer"},"idempotency_key":{"type":"string"}},("routine_id",))},
+ {"name":"guided_routine_timer","title":"Guided routine runner","description":"Start a saved standard routine (same rules as start_routine: never replaces an active workout) and return the guided-runner steps for server/render_timer_html.py --config: each set is a work step (count-up with Done, or a countdown when the item has target_duration_s) followed by a rest countdown (item rest_seconds, else default_rest_s), no rest after the last step. Log only the sets the user marks Done, using completion_handoff. HIIT routines are rejected: use hiit_timer.",
+  "inputSchema":O({"routine_id":{"type":"integer"},"lang":{"type":"string","enum":["en","zh"],"default":"en","description":"Exercise-name and UI language for the runner page"},
+    "default_rest_s":{"type":"integer","minimum":0,"maximum":3600,"default":90,"description":"Rest after a working set when the item has no rest_seconds"},"idempotency_key":{"type":"string"}},("routine_id",))},
  {"name":"start_workout","title":"Start accepted plan","description":"Start an accepted conversational plan as an active snapshot; generating or showing a plan must not call this tool.","inputSchema":O({"mode":{"type":"string","enum":["conversational_plan"]},"title":{"type":"string"},"items":{"type":"array","items":SESSION_ITEM},"idempotency_key":{"type":"string"},
     "session_weight":{"type":"number","exclusiveMinimum":0},"weight_unit":{"type":"string","enum":["lb","kg"]},"planned_duration_min":{"type":"number","exclusiveMinimum":0}},("mode",))},
  {"name":"get_active_workout","title":"Resume active workout","description":"Return the one active workout, completed work, and pending items.","inputSchema":O({}),"annotations":{"readOnlyHint":True}},
@@ -150,6 +153,8 @@ def _summary(name,r):
     return "Logged: "+"; ".join(f"{x['exercise']} {x['reps'] or ''}{' reps' if x['reps'] else ''}{(' @ '+str(x['weight'])+x['unit']) if x['weight'] is not None else ''}{' (PR!)' if x['is_pr'] else ''}" for x in r["logged"])
   if name=="hiit_timer":
     return f"HIIT timer ready (id {r['hiit_id']}): {r['rounds']} rounds × "+", ".join(f"{s.get('exercise') or s['kind']} {s['seconds']}s" for s in r["segments"])+f"; total {r['planned_seconds']//60}m{r['planned_seconds']%60:02d}s. Press Start."
+  if name=="guided_routine_timer":
+    return f"Guided runner ready for workout #{r['session_id']} ({r['status']}): {r['work_sets']} sets from '{r['name']}'. Render it with render_timer_html.py --config."
   return None
 def call_tool(c,name,a):
   a=a or {}
@@ -190,6 +195,7 @@ def call_tool(c,name,a):
   if name=="archive_routine": return routines.set_archived(c,a["routine_id"],True)
   if name=="restore_routine": return routines.set_archived(c,a["routine_id"],False)
   if name=="start_routine": return routines.start_routine(c,**a)
+  if name=="guided_routine_timer": return routines.guided_routine_timer(c,**a)
   if name=="start_workout": return workouts.start_workout(c,**a)
   if name=="get_active_workout": return workouts.get_active(c)
   if name=="add_workout_item": return workouts.add_session_item(c,a["item"])

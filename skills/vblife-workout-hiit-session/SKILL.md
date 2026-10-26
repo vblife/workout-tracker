@@ -18,6 +18,8 @@ A HIIT routine is a saved routine with `routine_type: "hiit"`. It holds an order
 4. **Several:** list them by name and ask which one, unless the user already named it.
 5. Build the timer with `hiit_timer` and `routine_id` (plus `rounds` to override the circuit count, which must be one of `round_options` if the routine has them). Pass `lang: "zh"` only under the language rule below, so the exercise names come out in Chinese. Each exercise is one work interval with its rest after it, rounds repeat the circuit, and the final rest is skipped. During each work interval the timer shows the exercise and "Next: <next exercise>".
 
+A standard (sets and reps) routine is not a HIIT circuit: run it with the guided routine runner in `vblife-workout-routine` (`guided_routine_timer`), not `hiit_timer`.
+
 If a routine is the wrong type (for example a timed circuit saved as standard), fix it with `update_routine` and `routine_type`. Change per-item timing with `update_routine` and `items`.
 
 ## Ad hoc HIIT
