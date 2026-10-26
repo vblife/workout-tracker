@@ -16,6 +16,7 @@ import reports
 import workouts
 
 SERVER_DIR = os.path.join(os.path.dirname(__file__), "..")
+NUTRIENT_KEYS = ("intake_kcal", "protein_g", "fat_g", "saturated_fat_g", "fiber_g", "sugar_g", "sodium_mg")
 NOW = datetime(2026, 10, 25, 5, tzinfo=timezone.utc)  # 2026-10-24 evening in Los Angeles
 
 
@@ -146,6 +147,73 @@ class EnergyDeficitTest(unittest.TestCase):
         daily = reports.report(self.c, "day", anchor_date="2026-10-21", now=NOW)["trend_series"]
         self.assertNotIn("primary_training_metric", daily)
         self.assertTrue(all("training_days" not in p and "total_energy_deficit_kcal" not in p for p in daily["points"]))
+
+    def _log(self, local_date, hour=12, **nutrients):
+        nutrition.save_entry(self.c, {"consumed_at": f"{local_date}T{hour:02d}:00:00", **nutrients,
+                                      "estimation_method": "model_only", "confidence": "moderate"}, confirmed=True)
+
+    def _nutrient_fixture(self):
+        core.update_settings(self.c, {"maintenance_kcal": 2370})
+        self._log("2026-10-19", calories_kcal=1800, protein_g=100, fat_g=60, saturated_fat_g=20, fiber_g=25, sugar_g=40,
+                  sodium_mg=2000, carbohydrates_g=200)
+        self._log("2026-10-19", hour=19, protein_g=20)  # protein-only entry adds to the day total
+        self._log("2026-10-21", calories_kcal=1850, protein_g=90, fiber_g=30)
+        self._log("2026-10-23", sodium_mg=1500)  # no calories: no intake or deficit that day
+        self._log("2026-09-15", calories_kcal=2070, protein_g=150, fat_g=70)
+
+    def test_trend_series_week_day_points_nutrient_totals(self):
+        self._nutrient_fixture()
+        week = reports.report(self.c, "week", anchor_date="2026-10-21", now=NOW)["trend_series"]
+        days = {d["date"]: d for d in week["day_points"]}
+        self.assertEqual({k: days["2026-10-19"][k] for k in NUTRIENT_KEYS},
+                         {"intake_kcal": 1800, "protein_g": 120, "fat_g": 60, "saturated_fat_g": 20, "fiber_g": 25,
+                          "sugar_g": 40, "sodium_mg": 2000})
+        self.assertEqual(days["2026-10-19"]["energy_deficit_kcal"], 570)
+        self.assertEqual({k: days["2026-10-21"][k] for k in NUTRIENT_KEYS},
+                         {"intake_kcal": 1850, "protein_g": 90, "fat_g": None, "saturated_fat_g": None, "fiber_g": 30,
+                          "sugar_g": None, "sodium_mg": None})
+        self.assertEqual({k: days["2026-10-23"][k] for k in NUTRIENT_KEYS + ("energy_deficit_kcal",)},
+                         {**dict.fromkeys(NUTRIENT_KEYS + ("energy_deficit_kcal",)), "sodium_mg": 1500})
+        self.assertTrue(all(days["2026-10-20"][k] is None for k in NUTRIENT_KEYS))  # null, never 0
+        self.assertTrue(all("carbohydrates_g" not in d for d in week["day_points"]))
+        current, prior = week["points"][-1], week["points"][-2]
+        self.assertEqual({k: current[k] for k in NUTRIENT_KEYS},
+                         {"intake_kcal": 1825, "protein_g": 105, "fat_g": 60, "saturated_fat_g": 20, "fiber_g": 27.5,
+                          "sugar_g": 40, "sodium_mg": 1750})
+        self.assertEqual((current["total_energy_deficit_kcal"], current["days_with_intake"]), (570 + 520, 2))
+        self.assertTrue(all(prior[k] is None for k in NUTRIENT_KEYS))
+
+    def test_trend_series_month_year_points_nutrient_daily_averages(self):
+        self._nutrient_fixture()
+        october = {"intake_kcal": 1825, "protein_g": 105, "fat_g": 60, "saturated_fat_g": 20, "fiber_g": 27.5,
+                   "sugar_g": 40, "sodium_mg": 1750}
+        september = {**dict.fromkeys(NUTRIENT_KEYS), "intake_kcal": 2070, "protein_g": 150, "fat_g": 70}
+        month = reports.report(self.c, "month", anchor_date="2026-10-21", now=NOW)
+        by = {p["period"]: p for p in month["trend_series"]["points"]}
+        self.assertEqual({k: by["2026-10"][k] for k in NUTRIENT_KEYS}, october)
+        self.assertEqual({k: by["2026-09"][k] for k in NUTRIENT_KEYS}, september)
+        self.assertTrue(all(by["2026-08"][k] is None for k in NUTRIENT_KEYS))
+        # Same rule as nutrition.*_daily_average for the report month.
+        self.assertEqual(by["2026-10"]["protein_g"], month["nutrition"]["protein_g_daily_average"])
+        self.assertEqual(by["2026-10"]["sodium_mg"], month["nutrition"]["sodium_mg_daily_average"])
+        self.assertEqual(by["2026-10"]["intake_kcal"], month["nutrition"]["calories_kcal_daily_average"])
+        self.assertEqual(by["2026-10"]["total_energy_deficit_kcal"], 1090)  # deficit totals unchanged
+        year = {p["period"]: p for p in reports.report(self.c, "year", anchor_date="2026-10-21", now=NOW)["trend_series"]["points"]}
+        self.assertEqual({k: year["2026-10"][k] for k in NUTRIENT_KEYS}, october)
+        self.assertEqual({k: year["2026-09"][k] for k in NUTRIENT_KEYS}, september)
+        self.assertTrue(all(year["2026-01"][k] is None for k in NUTRIENT_KEYS))
+        quarter = reports.report(self.c, "quarter", anchor_date="2026-10-21", now=NOW)["trend_series"]["points"]
+        self.assertEqual({k: quarter[-1][k] for k in NUTRIENT_KEYS}, october)
+        everything = reports.report(self.c, "all", anchor_date="2026-10-21", now=NOW)["trend_series"]["points"][-1]
+        self.assertEqual((everything["intake_kcal"], everything["protein_g"]), (round((1800 + 1850 + 2070) / 3, 1), 120))
+        for points in (by.values(), year.values(), quarter):
+            self.assertTrue(all("carbohydrates_g" not in p for p in points))
+
+    def test_day_trend_series_has_no_multi_day_nutrient_fields(self):
+        self._nutrient_fixture()
+        daily = reports.report(self.c, "day", anchor_date="2026-10-21", now=NOW)["trend_series"]
+        self.assertNotIn("day_points", daily)
+        self.assertTrue(all(k not in p for p in daily["points"] for k in NUTRIENT_KEYS))
 
     def test_uses_each_users_own_numbers(self):
         core.update_settings(self.c, {"maintenance_kcal": 2200})

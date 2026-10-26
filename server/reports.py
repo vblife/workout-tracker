@@ -118,10 +118,29 @@ def _trend_bounds(period,anchor):
   a,b=period_bounds(period,anchor) if period!="all" else (anchor-timedelta(days=365),anchor+timedelta(days=1))
   return ("week" if period=="quarter" else "month"),[(a,b)]
 
-def _daily_intake(c,a,b):
-  """Confirmed calories_kcal per user-local date in [a,b): {iso_date: kcal}."""
-  return {r["local_date"]:r["kcal"] for r in c.execute("""SELECT local_date,sum(calories_kcal) kcal FROM nutrition_entries
-    WHERE local_date>=? AND local_date<? AND calories_kcal IS NOT NULL GROUP BY local_date""",(a.isoformat(),b.isoformat()))}
+# Chart-facing nutrients on multi-day trend_series. Carbohydrates are intentionally not charted.
+TREND_NUTRIENTS=("protein_g","fat_g","saturated_fat_g","fiber_g","sugar_g","sodium_mg")
+
+def _daily_nutrients(c,a,b):
+  """Confirmed per-nutrient sums per user-local date in [a,b): {iso_date: {calories_kcal, protein_g, ...}}.
+  A nutrient is None on a day when no entry that day logged it (SQL sum over only NULLs)."""
+  cols=("calories_kcal",)+TREND_NUTRIENTS
+  return {r["local_date"]:{k:r[k] for k in cols} for r in c.execute(
+    "SELECT local_date,"+",".join(f"sum({k}) {k}" for k in cols)+""" FROM nutrition_entries
+    WHERE local_date>=? AND local_date<? GROUP BY local_date""",(a.isoformat(),b.isoformat()))}
+
+def _daily_intake(nutrients):
+  """Confirmed calories_kcal per user-local date from _daily_nutrients: {iso_date: kcal}, days without calories omitted."""
+  return {d:v["calories_kcal"] for d,v in nutrients.items() if v["calories_kcal"] is not None}
+
+def _nutrient_daily_averages(nutrients,a,b):
+  """Per-bucket daily averages over days in [a,b) that logged each nutrient (the nutrition *_daily_average rule).
+  intake_kcal is the average daily calories over days with calories logged. None when no day logged it."""
+  out={}
+  for src,key in (("calories_kcal","intake_kcal"),)+tuple((k,k) for k in TREND_NUTRIENTS):
+    vals=[v[src] for d,v in nutrients.items() if a.isoformat()<=d<b.isoformat() and v[src] is not None]
+    out[key]=round(sum(vals)/len(vals),1) if vals else None
+  return out
 
 def _deficit_totals(intake,maintenance,a,b):
   """Energy deficit (maintenance - intake) summed over days in [a,b) that have intake. None without maintenance."""
@@ -132,11 +151,14 @@ def _deficit_totals(intake,maintenance,a,b):
           "avg_daily_energy_deficit_kcal":round(sum(deficits)/len(deficits),1) if deficits else None}
 
 def _trend(c,period,anchor,unit,tz,maintenance=None):
-  """Trend points. Multi-day periods add training_days (the primary training trend) and the energy deficit per point;
-  week also adds day_points (one per day of the report week). Day keeps its 28-day rhythm without training-day fields.
+  """Trend points. Multi-day periods add training_days (the primary training trend), the energy deficit, and
+  chart-facing nutrient daily averages (intake_kcal, protein_g, ...; over days that logged each nutrient) per point;
+  week also adds day_points (one per day of the report week, nutrients as that day's confirmed totals).
+  Day keeps its 28-day rhythm without training-day or nutrient fields.
   training_minutes stays on each point for backward compatibility only."""
   group,bounds=_trend_bounds(period,anchor); points=[]; multi=period!="day"
-  intake=_daily_intake(c,bounds[0][0],bounds[-1][1]) if multi else {}
+  nutrients=_daily_nutrients(c,bounds[0][0],bounds[-1][1]) if multi else {}
+  intake=_daily_intake(nutrients)
   for a,b in bounds:
     sessions=c.execute("SELECT * FROM sessions WHERE status='completed' AND started_at>=? AND started_at<?",(U(a,tz),U(b,tz))).fetchall()
     volume=c.execute("""SELECT coalesce(sum(x.weight_kg*x.reps),0) FROM sets x JOIN sessions s ON s.id=x.session_id
@@ -148,6 +170,7 @@ def _trend(c,period,anchor,unit,tz,maintenance=None):
     if multi:
       point["training_days"]=len({_local(x["started_at"],tz).date() for x in sessions})
       point.update(_deficit_totals(intake,maintenance,a,b))
+      point.update(_nutrient_daily_averages(nutrients,a,b))
     points.append(point)
   out={"group_by":group,"points":points}
   if multi: out["primary_training_metric"]="training_days"
@@ -161,7 +184,8 @@ def _trend(c,period,anchor,unit,tz,maintenance=None):
       d=a+timedelta(days=i); kcal=intake_w.get(d.isoformat())
       out["day_points"].append({"date":d.isoformat(),"trained":1 if trained.get(d) else 0,"sessions":trained.get(d,0),
         "intake_kcal":round(kcal,1) if kcal is not None else None,
-        "energy_deficit_kcal":round(maintenance-kcal,1) if kcal is not None and maintenance is not None else None})
+        "energy_deficit_kcal":round(maintenance-kcal,1) if kcal is not None and maintenance is not None else None,
+        **{k:round(v,1) if v is not None else None for k,v in ((k,nutrients.get(d.isoformat(),{}).get(k)) for k in TREND_NUTRIENTS)}})
   return out
 
 def _nutrition(c,period,a,b,tz):
