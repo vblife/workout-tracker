@@ -16,6 +16,14 @@ Usage:
   python server/render_timer_html.py out.html --duration 2:00 --label "..." --lang zh
   python server/render_timer_html.py out.html --work 40 --rest 20 --rounds 10,20 --label "HIIT 40/20"
   python server/render_timer_html.py out.html --routine-id 3 --label "Circuit"   # saved hiit routine (read-only)
+  python server/render_timer_html.py out.html --duration 5:00 --label "5-minute timer" --cache-dir /workspace/timer-cache
+
+Caching (--cache-dir DIR, or env WORKOUT_TIMER_CACHE): the rendered HTML is stored as
+DIR/<key>.html, where key is a sha256 prefix of the template plus the normalized config
+without hiit_id. Rendering the same timer again (same template, same config, any out path)
+reuses that file; a hiit_id in the request is patched into the copy written to out.html, so
+HIIT sessions with different ids share one cache entry. A "timer cache hit <key>" or
+"timer cache miss <key>" line goes to stderr. Without either setting, caching is off.
 
 Config keys (all optional):
   label        title shown on the page (hiit_timer "name" is accepted too)
@@ -32,13 +40,14 @@ Config keys (all optional):
                tick false removes the soft once-per-second tick and its on-page toggle
 """
 import argparse
+import hashlib
 import json
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from render_report_html import render as _inject  # noqa: E402
+from render_report_html import render as _inject, safe_json  # noqa: E402
 
 DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "timer.html")
 DEFAULTS = {"label": "Timer", "duration_s": 60, "ready_s": 5, "lang": "en"}
@@ -51,6 +60,9 @@ MAX_SECONDS = 86400
 MAX_INTERVALS = 2000
 MAX_ROUNDS = 100
 MAX_ROUND_OPTIONS = 6
+CACHE_KEY_LEN = 32
+INJECT_PREFIX = "<script>window.openai={toolOutput:"  # written by render_report_html.render
+INJECT_SUFFIX = "};</script>"
 
 
 def _round_count(value, name):
@@ -224,6 +236,67 @@ def render(config, template_html):
     return _inject(normalize_config(config), template_html)
 
 
+def _without_hiit_id(normalized):
+    return {k: v for k, v in normalized.items() if k != "hiit_id"}
+
+
+def fingerprint(normalized, template_html):
+    """Cache key: sha256 of the template plus the normalized config, ignoring hiit_id."""
+    template_bytes = template_html.encode("utf-8") if isinstance(template_html, str) else template_html
+    config = json.dumps(_without_hiit_id(normalized), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256()
+    digest.update(template_bytes)
+    digest.update(b"\0")
+    digest.update(config.encode("utf-8"))
+    return digest.hexdigest()[:CACHE_KEY_LEN]
+
+
+def cache_path(cache_dir, key):
+    return os.path.join(cache_dir, f"{key}.html")
+
+
+def apply_hiit_id(html, hiit_id):
+    """Set (or, for None, remove) hiit_id in the injected config of a rendered timer page."""
+    start = html.find(INJECT_PREFIX)
+    if start < 0:
+        raise ValueError("timer HTML has no injected config")
+    body = start + len(INJECT_PREFIX)
+    end = html.find(INJECT_SUFFIX, body)
+    if end < 0:
+        raise ValueError("timer HTML has an unterminated injected config")
+    # safe_json only adds \uXXXX escapes, which json.loads reads back unchanged.
+    config = json.loads(html[body:end])
+    if hiit_id is None:
+        config.pop("hiit_id", None)
+    else:
+        config["hiit_id"] = hiit_id
+    return html[:body] + safe_json(config) + html[end:]
+
+
+def render_cached(normalized, template_html, cache_dir):
+    """Return (html, key, hit) for a normalized config, reusing cache_dir/<key>.html when present.
+
+    The cache file never contains hiit_id; the returned html carries normalized's hiit_id, if any.
+    """
+    key = fingerprint(normalized, template_html)
+    path = cache_path(cache_dir, key)
+    hiit_id = normalized.get("hiit_id")
+    try:
+        with open(path, encoding="utf-8") as f:
+            cached = f.read()
+        return apply_hiit_id(cached, hiit_id), key, True
+    except (OSError, ValueError):
+        pass  # missing or unreadable entry: render and overwrite it
+    shared = _inject(_without_hiit_id(normalized), template_html)
+    os.makedirs(cache_dir, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(shared)
+    os.replace(tmp, path)
+    html = shared if hiit_id is None else _inject(normalized, template_html)
+    return html, key, False
+
+
 def _routine_config(p, a):
     """hiit_timer-equivalent config for a saved hiit routine, read through the server's data layer."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -272,6 +345,9 @@ def main(argv=None):
                    help="remove the soft once-per-second tick and its toggle (same as \"tick\": false)")
     p.add_argument("--lang", choices=LANGS, help="UI language (default en)")
     p.add_argument("--template", default=os.environ.get("WORKOUT_TIMER_TEMPLATE", DEFAULT_TEMPLATE))
+    p.add_argument("--cache-dir", default=os.environ.get("WORKOUT_TIMER_CACHE") or None,
+                   help="reuse rendered HTML from this directory, keyed by template + config without hiit_id "
+                        "(default: $WORKOUT_TIMER_CACHE; caching is off when neither is set)")
     a = p.parse_args(argv)
     config = {}
     if a.config:
@@ -343,7 +419,11 @@ def main(argv=None):
         for label in cjk_labels(normalized):
             print(f"warning: timer label is not English: {label!r}; the UI is English (lang en), "
                   "pass an English label or --lang zh", file=sys.stderr)
-    html = _inject(normalized, template)
+    if a.cache_dir:
+        html, key, hit = render_cached(normalized, template, a.cache_dir)
+        print(f"timer cache {'hit' if hit else 'miss'} {key}", file=sys.stderr)
+    else:
+        html = _inject(normalized, template)
     with open(a.out_html, "w", encoding="utf-8") as f:
         f.write(html)
 
