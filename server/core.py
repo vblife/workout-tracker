@@ -12,7 +12,9 @@ SETTING_KEYS={"unit":str,"days_per_week":int,"goals":list,"preferred_days":list,
   "experience":str,"equipment":list,"timezone":str,"bodyweight":float,"injuries":str,"constraints":str,
   "rep_range_default":str,"onboarded_at":str,"reminders_enabled":bool,"daily_plan_enabled":bool,
   "workout_reminder_enabled":bool,"weekly_report_enabled":bool,"hiit_defaults":dict,
-  "model_only_acknowledged":bool,"nutrition_profile":dict}
+  "model_only_acknowledged":bool,"nutrition_profile":dict,"maintenance_kcal":float}
+# Settings that update_settings deletes when sent as null.
+CLEARABLE_SETTINGS=("hiit_defaults","maintenance_kcal")
 ONBOARDING_REQUIRED=()
 
 class UserError(Exception): pass
@@ -65,12 +67,13 @@ def update_settings(c,settings):
   if not isinstance(settings,dict) or not settings: raise UserError("settings must be a non-empty object")
   for k,v in settings.items():
     if k not in SETTING_KEYS: raise UserError(f"unknown setting '{k}'. Allowed: {sorted(SETTING_KEYS)}")
-    if k=="hiit_defaults" and v is None: continue
+    if k in CLEARABLE_SETTINGS and v is None: continue
     typ=SETTING_KEYS[k]
     if typ is float and isinstance(v,int): v=float(v)
     if not isinstance(v,typ) or (typ is not bool and isinstance(v,bool)): raise UserError(f"setting '{k}' must be {typ.__name__}")
     if k=="unit" and v not in("lb","kg"): raise UserError("unit must be 'lb' or 'kg'")
     if k=="days_per_week" and not 1<=v<=7: raise UserError("days_per_week must be 1-7")
+    if k=="maintenance_kcal" and not 800<=v<=10000: raise UserError("maintenance_kcal must be a daily kcal number from 800 to 10000")
     if k=="rep_range_default":
       import re
       if not re.fullmatch(r"\d{1,2}-\d{1,2}",v): raise UserError("rep_range_default must look like 8-12")
@@ -83,7 +86,7 @@ def update_settings(c,settings):
         raise UserError("hiit_defaults needs positive work/rest/rounds and non-negative warmup/cooldown")
   t=dbm.now()
   for k,v in settings.items():
-    if k=="hiit_defaults" and v is None:
+    if k in CLEARABLE_SETTINGS and v is None:
       c.execute("DELETE FROM settings WHERE key=?",(k,)); continue
     c.execute("INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",(k,json.dumps(v,ensure_ascii=False),t))
   s=get_settings(c)

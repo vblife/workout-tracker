@@ -143,6 +143,42 @@ def _nutrition(c,period,a,b,tz):
   out["confidence"]={level:sum(1 for r in rows if r["confidence"]==level) for level in ("higher","moderate","rough")}
   return out
 
+def _calorie_max_goal(c):
+  """The user's active daily calories_kcal maximum goal, or None. Never a hard-coded number."""
+  for g in goals.list_goals(c,domain="nutrition")["goals"]:
+    if g["metric"]=="calories_kcal" and g["period"]=="day" and g["semantics"]=="maximum" and g["target_value"] is not None: return g
+  return None
+
+def _energy_balance(c,period,a,b,settings):
+  """Energy deficit vs settings.maintenance_kcal (deficit = maintenance - confirmed intake).
+  Workout-burned calories are reported separately and never folded in here."""
+  maintenance=settings.get("maintenance_kcal"); goal=_calorie_max_goal(c)
+  cal_max=goal["target_value"] if goal else None
+  target=round(maintenance-cal_max) if maintenance is not None and cal_max is not None else None
+  rows=c.execute("""SELECT local_date,sum(calories_kcal) kcal FROM nutrition_entries WHERE local_date>=? AND local_date<?
+    AND calories_kcal IS NOT NULL GROUP BY local_date ORDER BY local_date""",(a.isoformat(),b.isoformat())).fetchall()
+  days=[{"date":r["local_date"],"intake_kcal":round(r["kcal"],1),
+         "energy_deficit_kcal":round(maintenance-r["kcal"],1) if maintenance is not None else None,
+         "within_calorie_max":(r["kcal"]<=cal_max) if cal_max is not None else None,
+         "met_deficit_target":(maintenance-r["kcal"]>=target) if target is not None else None} for r in rows]
+  out={"maintenance_kcal":maintenance,"maintenance_source":"settings" if maintenance is not None else None,
+       "calorie_max_kcal":cal_max,"calorie_max_goal_id":goal["goal_id"] if goal else None,"target_energy_deficit_kcal":target,
+       "available":maintenance is not None and bool(days)}
+  if period=="day":
+    d=days[0] if days else None
+    out.update(intake_kcal=d["intake_kcal"] if d else None,energy_deficit_kcal=d["energy_deficit_kcal"] if d else None,
+               within_calorie_max=d["within_calorie_max"] if d else None,met_deficit_target=d["met_deficit_target"] if d else None,
+               kcal_under_max=round(cal_max-d["intake_kcal"],1) if d and cal_max is not None else None,
+               deficit_vs_target_kcal=round(d["energy_deficit_kcal"]-target,1) if d and target is not None and d["energy_deficit_kcal"] is not None else None)
+    return out
+  deficits=[d["energy_deficit_kcal"] for d in days if d["energy_deficit_kcal"] is not None]
+  out.update(days_with_intake=len(days),
+             avg_daily_energy_deficit_kcal=round(sum(deficits)/len(deficits),1) if deficits else None,
+             days_meeting_deficit_target=sum(1 for d in days if d["met_deficit_target"]) if target is not None else None,
+             days_within_calorie_max=sum(1 for d in days if d["within_calorie_max"]) if cal_max is not None else None)
+  if period in ("week","month"): out["days"]=days
+  return out
+
 def report(c,period="week",anchor_date=None,now=None):
   if period not in PERIODS: raise UserError("period must be day|week|month|quarter|year|all")
   unit=display_unit(c); s=get_settings(c); tzs=core.timezone_status(c,s); tz=user_timezone(c,s); target=s.get("days_per_week") or 4
@@ -158,6 +194,7 @@ def report(c,period="week",anchor_date=None,now=None):
        "distance_unit":"mi" if unit=="lb" else "km","elevation_unit":"ft" if unit=="lb" else "m","target_days_per_week":target,**tzs,"summary":cur}
   out["active_workout"]=workouts.get_active(c,now)["active_workout"]
   out["nutrition"]=_nutrition(c,period,a,b,tz)
+  out["energy_balance"]=_energy_balance(c,period,a,b,s)
   out["trend_series"]=_trend(c,period,anchor,unit,tz)
   out["goal_progress"]=[]
   for goal in goals.list_goals(c)["goals"]:

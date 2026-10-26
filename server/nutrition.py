@@ -161,6 +161,7 @@ def search_usda(query, api_key=None, opener=None):
 
 ACTIVITY_FACTORS = {"sedentary": 1.2, "light": 1.375, "moderate": 1.55, "active": 1.725, "very_active": 1.9}
 OBJECTIVES = ("maintenance", "fat_loss", "muscle_gain")
+OBJECTIVE_ADJUSTMENT_KCAL = {"maintenance": 0, "fat_loss": -350, "muscle_gain": 250}
 SEXES = ("male", "female")
 RECOMMEND_INPUTS = ("age", "weight_kg", "height_cm", "sex", "activity_level", "objective")
 GUARDRAIL_FLAGS = ("pregnant", "breastfeeding", "eating_disorder", "medical_condition")
@@ -213,10 +214,16 @@ def recommend_goals(inputs):
     if not missing:
         sex_term = 5 if inputs["sex"] == "male" else -161
         resting = 10 * inputs["weight_kg"] + 6.25 * inputs["height_cm"] - 5 * inputs["age"] + sex_term
-        calories = resting * factors[inputs["activity_level"]] + {"maintenance": 0, "fat_loss": -350, "muscle_gain": 250}[inputs["objective"]]
+        maintenance = resting * factors[inputs["activity_level"]]
+        calories = maintenance + OBJECTIVE_ADJUSTMENT_KCAL[inputs["objective"]]
         protein = inputs["weight_kg"] * (1.8 if inputs["objective"] == "muscle_gain" else 1.6)
         recommendations.update({"calories_kcal": round(calories / 10) * 10, "protein_g": round(protein),
-                                "saturated_fat_g_max": round(calories * 0.1 / 9)})
+                                "saturated_fat_g_max": round(calories * 0.1 / 9),
+                                # Estimated TDEE; save as settings.maintenance_kcal only after the user confirms it.
+                                "maintenance_kcal": round(maintenance / 10) * 10})
+        if inputs["objective"] == "fat_loss":
+            # Fat loss is a daily ceiling (intake <= target), not a range.
+            recommendations["calories_kcal_max"] = recommendations["calories_kcal"]
     assumptions = {key: inputs[key] for key in required if inputs.get(key) is not None}
     ignored = sorted(key for key in inputs if key not in RECOMMEND_INPUTS and key not in GUARDRAIL_FLAGS)
     result_extra = {"ignored_inputs": ignored} if ignored else {}

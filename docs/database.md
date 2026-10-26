@@ -67,3 +67,15 @@ reports `timezone_missing: true`; it never falls back to a hard-coded Pacific or
 - `local_date` (`TEXT NOT NULL`, `YYYY-MM-DD`): the date of `consumed_at` in `capture_timezone`. It is the single day
   key for nutrition: `nutrition_daily_totals`, `list_nutrition` date filters, nutrition goal progress, and the
   nutrition section of `report` all group by it.
+
+## Maintenance energy and energy deficit
+
+`settings.maintenance_kcal` is a regular row in the key-value `settings` table (no schema migration). It holds the
+user's confirmed daily maintenance energy (TDEE) in kcal, validated to 800–10000, and is written only through
+`update_settings` (sending `null` clears it). `recommend_nutrition_goals` returns an estimate as
+`recommendations.maintenance_kcal`; the bot saves it only after the user confirms.
+
+`report` adds `energy_balance`: energy deficit = `maintenance_kcal` minus the confirmed `calories_kcal` intake for each
+`local_date`, and target deficit = `maintenance_kcal` minus the user's active daily `calories_kcal` goal with
+`maximum` semantics. Workout `estimated_calories` are never part of this calculation. Fields are `null` when the
+setting, the intake, or the maximum goal is missing.

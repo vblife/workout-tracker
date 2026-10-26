@@ -21,7 +21,7 @@ Match the shipped weekly example titled like `Training & Nutrition Week · <star
 1. `Page` with `width="wide"`, a period title, and a one- or two-sentence `summary` of the main takeaway.
 2. Optional `TableOfContents` when there are about six or more sections.
 3. One short `Callout` for the period highlight (tone only when it fits info / success / warning / danger).
-4. Overview: two-column `Grid` of `Properties` for training totals and nutrient averages (or day totals for a daily report).
+4. Overview: two-column `Grid` of `Properties` for training totals and nutrient averages (or day totals for a daily report). When `energy_balance.available` is true, add the energy deficit next to calories (see Energy deficit below).
 5. Trends: `Segmented` switching training vs nutrition, then nested `Segmented` for the metric or nutrient; `LineChart` / `ColumnSeries` from the period's trend points in the `report` JSON (six weekly points for week/month views, twelve monthly points for year, recent four-week rhythm for day).
 6. Goal progress table with hit rates and `Status` pills when goals exist.
 7. Period-over-period comparison when the tool returns a prior window.
@@ -40,12 +40,25 @@ Daily (`period=day`) and weekly (`period=week`) reports use the same Page patter
 | Comparison | Today vs yesterday from `vs_previous` (day-over-day) | This week vs the prior week from `vs_previous` (week-over-week) |
 | Overview | Day totals for training and nutrients | Training totals and per-day nutrient averages |
 | Trends | Recent four-week rhythm from the `report` trend points | Six weekly points for training time, strength volume, and cardio duration |
-| Goals | Distance to each daily target (how much is left, or how far over) | Goal hit rates across the week |
+| Goals | Distance to each daily target (how much is left, or how far over); for a calorie maximum, kcal under or over the maximum | Goal hit rates across the week |
+| Energy deficit | `energy_deficit_kcal` vs `target_energy_deficit_kcal` | `avg_daily_energy_deficit_kcal` and `days_meeting_deficit_target` of `days_with_intake` |
 | Tips | Two or three short, concrete actions for tomorrow | Two or three short actions for the coming week |
 
 Tips for both say what to do more or less of (for example more cardio minutes, one fewer hard session, more mobility) and which nutrients to eat more or less of (for example more protein, less added sugar, more fiber). Tips name nutrients and amounts only, never foods, dishes, or meals.
 
 A scheduled daily report runs in the evening, so treat the day as possibly unfinished: phrase distance to goals as what is still open today, not as a missed target.
+
+### Energy deficit
+
+`report` returns `energy_balance`, computed from `settings.maintenance_kcal` and the user's own `calories_kcal` maximum goal. Show it only from those fields; never compute it from a calorie number in goal assumptions or memory, and never hard-code a calorie value.
+
+- Day: `maintenance_kcal`, `intake_kcal`, `energy_deficit_kcal` (maintenance minus intake), `target_energy_deficit_kcal` (maintenance minus the calorie maximum), `within_calorie_max`, `met_deficit_target`, `kcal_under_max` (negative means over the maximum), and `deficit_vs_target_kcal`.
+- Week and month: `avg_daily_energy_deficit_kcal`, `days_meeting_deficit_target`, `days_within_calorie_max`, `days_with_intake`, and per-day `days` for a chart. Longer periods return the same averages and counts without `days`.
+- Distance to the calorie goal is "N kcal under the maximum" or "N kcal over the maximum", plus the deficit vs its target (for example "deficit 570 kcal, target 470 kcal"). A calorie maximum is an upper limit, not a range.
+- Keep consumed and workout-burned energy separate. The deficit is against maintenance only; never add or subtract workout calories.
+- If `maintenance_kcal` is null, omit the deficit and add one short note that it needs a saved maintenance estimate (see `vblife-workout-nutrition`). If there is no calorie maximum goal, show the deficit without a target.
+- A daily report may run before the day ends: phrase an open day as the deficit so far.
+- Labels: "Energy deficit" and "Target deficit" in English. In Chinese, use the standard Chinese term for energy deficit (pinyin "nengliang quekou") and its target form.
 
 ### Nutrition privacy on the Page
 
@@ -77,7 +90,8 @@ Whether or not the Page writes cleanly, the short chat summary still covers:
 1. Period and primary goal progress.
 2. Sessions, training minutes, strength volume, cardio duration, distance, and estimated workout calories with confidence coverage.
 3. Confirmed nutrition totals for a day or per-day averages, recorded-day count, and goal-hit rates for longer periods; keep consumed and burned energy separate.
-4. One or two actionable recommendations.
+4. Energy deficit vs target when `energy_balance.available` is true: the day's deficit and kcal under or over the calorie maximum, or the average daily deficit and days meeting the target for longer periods.
+5. One or two actionable recommendations.
 
 Weekly reports explain the six weekly points for training time, strength volume, and cardio duration, plus the change vs the prior week. Monthly reports explain the same three metrics across six monthly points. Annual reports explain twelve monthly points. Daily reports cover today vs yesterday, distance to daily goals, and the recent four-week rhythm.
 

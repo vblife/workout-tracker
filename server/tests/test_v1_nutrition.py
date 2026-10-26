@@ -133,10 +133,33 @@ class NutritionTest(unittest.TestCase):
     def test_recommendation_keys_map_to_goal_metrics(self):
         import goals
         rec = nutrition.recommend_goals(self.FULL)["recommendations"]
-        self.assertEqual(set(rec), {"calories_kcal", "protein_g", "protein_g_range", "fiber_g", "saturated_fat_g_max", "sodium_mg_max"})
-        for key in rec:
+        self.assertEqual(set(rec), {"calories_kcal", "calories_kcal_max", "maintenance_kcal", "protein_g", "protein_g_range",
+                                    "fiber_g", "saturated_fat_g_max", "sodium_mg_max"})
+        self.assertIn("maintenance_kcal", core.SETTING_KEYS)  # a setting, not a goal metric
+        for key in set(rec) - {"maintenance_kcal"}:
             metric = key.replace("_range", "").replace("_max", "")
             self.assertIn(metric, goals.NUTRITION_METRICS, key)
+
+    def test_fat_loss_recommends_calorie_maximum_and_maintenance(self):
+        fat_loss = nutrition.recommend_goals({**self.FULL, "objective": "fat_loss"})["recommendations"]
+        maintenance = nutrition.recommend_goals({**self.FULL, "objective": "maintenance"})["recommendations"]
+        self.assertEqual(fat_loss["calories_kcal_max"], fat_loss["calories_kcal"])
+        self.assertNotIn("calories_kcal_range", fat_loss)
+        self.assertEqual(fat_loss["maintenance_kcal"], maintenance["calories_kcal"])
+        self.assertEqual(maintenance["maintenance_kcal"], maintenance["calories_kcal"])
+        self.assertNotIn("calories_kcal_max", maintenance)
+        self.assertLess(fat_loss["calories_kcal_max"], fat_loss["maintenance_kcal"])
+        self.assertEqual(nutrition.recommend_goals({**self.FULL, "objective": "muscle_gain"})["recommendations"].keys()
+                         & {"calories_kcal_max"}, set())
+
+    def test_maintenance_kcal_is_a_first_class_setting(self):
+        saved = core.update_settings(self.c, {"maintenance_kcal": 2370})["settings"]
+        self.assertEqual(saved["maintenance_kcal"], 2370.0)
+        for bad in (0, -5, 50000, "2370", True):
+            with self.assertRaises(core.UserError):
+                core.update_settings(self.c, {"maintenance_kcal": bad})
+        self.assertEqual(core.get_settings(self.c)["maintenance_kcal"], 2370.0)
+        self.assertNotIn("maintenance_kcal", core.update_settings(self.c, {"maintenance_kcal": None})["settings"])
 
 
 if __name__ == "__main__":
