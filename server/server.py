@@ -128,7 +128,7 @@ TOOLS.extend([
  {"name":"set_workout_item_status","title":"Update active-workout item","description":"Mark an item pending, completed, or skipped in the active workout snapshot.","inputSchema":O({"item_id":{"type":"integer"},"status":{"type":"string","enum":["pending","completed","skipped"]}},("item_id","status")),"_meta":APP_TOOL},
  {"name":"move_set","title":"Move set to workout","description":"Correct timeout grouping by moving one logged set to another non-abandoned workout and recalculating both.","inputSchema":O({"set_id":{"type":"integer"},"target_session_id":{"type":"integer"}},("set_id","target_session_id"))},
  {"name":"merge_workouts","title":"Merge adjacent workouts","description":"Merge two adjacent completed workouts only after explicit confirmation; recalculates derived values.","inputSchema":O({"source_session_id":{"type":"integer"},"target_session_id":{"type":"integer"},"confirmed":{"type":"boolean","const":True}},("source_session_id","target_session_id","confirmed")),"annotations":{"destructiveHint":True}},
- {"name":"finish_workout","title":"Finish workout","description":"Finish the active workout immediately.","inputSchema":O({}),"_meta":APP_TOOL},
+ {"name":"finish_workout","title":"Finish workout","description":"Finish the active workout immediately. Optional session_id: finish only that workout; if it is not the active one (it already ended, e.g. closed after 15 minutes idle), nothing changes and the result has status already_finished with a note, leaving any other active workout untouched. Without session_id, finishes whatever workout is active.","inputSchema":O({"session_id":{"type":"integer","minimum":1}}),"_meta":APP_TOOL},
  {"name":"abandon_workout","title":"Abandon workout","description":"Abandon the active workout while preserving its history.","inputSchema":O({}),"annotations":{"destructiveHint":True}},
  {"name":"nutrition_status","title":"Nutrition estimation status","description":"Report whether USDA hybrid estimation is available and whether model-only mode was acknowledged. Never returns the key.","inputSchema":O({}),"annotations":{"readOnlyHint":True}},
  {"name":"search_usda","title":"Search USDA nutrients","description":"Search FoodData Central using an agent-produced text candidate only. Never send an image. Failure returns a model-only fallback.","inputSchema":O({"query":{"type":"string"}},("query",)),"annotations":{"readOnlyHint":True}},
@@ -161,6 +161,7 @@ def _summary(name,r,ui=False):
     head=f"Guided runner ready for workout #{r['session_id']} ({r['status']}): {r['work_sets']} sets from '{r['name']}'."
     if ui: return head+" The runner is attached: it logs each set when the user taps Done and finishes the workout when they end it. Do not render an offline page, ask for a summary, or log these sets again."
     return head+" Render it with render_timer_html.py --config."
+  if name=="finish_workout" and r.get("status")=="already_finished": return r["note"]
   return None
 def call_tool(c,name,a):
   a=a or {}
@@ -210,7 +211,7 @@ def call_tool(c,name,a):
   if name=="set_workout_item_status": return workouts.set_session_item_status(c,a["item_id"],a["status"])
   if name=="move_set": return workouts.move_set(c,a["set_id"],a["target_session_id"])
   if name=="merge_workouts": return workouts.merge_sessions(c,**a)
-  if name=="finish_workout": return workouts.finish_workout(c)
+  if name=="finish_workout": return workouts.finish_workout(c,session_id=a.get("session_id"))
   if name=="abandon_workout": return workouts.abandon_workout(c)
   if name=="nutrition_status": return nutrition.nutrition_status(c)
   if name=="search_usda": return nutrition.search_usda(**a)

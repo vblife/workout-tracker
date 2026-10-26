@@ -100,8 +100,10 @@ preview that starts no workout (`--default-rest SECONDS` changes the 90 s defaul
   (`performed_at = done_at`, `session_item_id`); a `loggable: false` step with a session item is marked
   completed with `set_workout_item_status`. Calls run one at a time in order, once per step. On End workout or
   the natural finish the page waits for pending calls, retries a failed call once (never a timed-out one,
-  which may have been saved), and then calls `finish_workout`, without asking, even when nothing was marked
-  Done. Skipped and unreached sets are never logged. If a set still could not be saved, `finish_workout` is not
+  which may have been saved), and then calls `finish_workout` with the runner's `session_id`, without asking,
+  even when nothing was marked Done. If that workout already ended (for example it closed after 15 minutes
+  idle and another workout became active from chat), `finish_workout` changes nothing and returns
+  `status: "already_finished"` with a `note`, so End never finishes an unrelated workout. Skipped and unreached sets are never logged. If a set still could not be saved, `finish_workout` is not
   called and the page falls back to the offline summary with the unlogged steps (`auto_log` in the JSON) so the
   bot can log them. Without the bridge (the rendered file, or a host without MCP Apps) nothing is sent.
 - **Cache.** `session_id` and the per-step `session_item_id`s (stored as a top-level `session_item_ids` list)

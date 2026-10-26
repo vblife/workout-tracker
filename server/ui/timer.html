@@ -300,7 +300,8 @@ function gCues(len,nextKind){var cues=[],ticks=[],tone=nextKind==="rest"?"rest":
    with performed_at = done_at, or set_workout_item_status completed for a loggable:false (activity-only)
    step with a session item. gLogger runs those calls one at a time, in order, at most once per step (or
    per item for status calls), and finish() waits for them, retries failed calls once (never a timed-out
-   one, which may have been saved), then calls finish_workout only if every Done entry was recorded. */
+   one, which may have been saved), then calls finish_workout only if every Done entry was recorded, passing
+   hooks.session_id so an unrelated workout that became active meanwhile is never finished. */
 function gLogCall(e){if(!e||typeof e!=="object")return null;
  if(e.loggable===false)return e.session_item_id?{name:"set_workout_item_status",arguments:{item_id:e.session_item_id,status:"completed"}}:null;
  var s={exercise:e.exercise};if(e.reps)s.reps=e.reps;if(e.weight!==null&&e.weight!==undefined){s.weight=e.weight;if(e.unit)s.unit=e.unit}
@@ -323,7 +324,7 @@ function gLogger(call,ok,hooks){hooks=hooks||{};var q=[],seen={},busy=false,done
   failed:failed.map(function(j){return{step:j.step,tool:j.call.name,unknown:j.unknown}})}}
  function finish(){if(fin)return fin;fin=drain().then(function(){var again=failed.filter(function(j){return!j.unknown&&j.tries<2});
    failed=failed.filter(function(j){return again.indexOf(j)<0});again.forEach(function(j){q.push(j)});pump();return drain()})
-  .then(function(){if(failed.length)return state();return Promise.resolve().then(function(){return call("finish_workout",{})})
+  .then(function(){if(failed.length)return state();return Promise.resolve().then(function(){return call("finish_workout",hooks.session_id?{session_id:hooks.session_id}:{})})
    .then(function(r){finished=ok("finish_workout",r);return state()},function(){return state()})});return fin}
  return{add:add,drain:drain,finish:finish,state:state}}
 /* guided-log:end */
@@ -333,7 +334,8 @@ function guidedRunner(){
  /* MCP Apps: log each Done set as it happens (LOG is null on the offline page, which hands off by summary). */
  var LOG=APP.embedded?gLogger(function(n,a){return APP.ready.then(function(on){if(!on)throw new Error("no MCP Apps host");return APP.callTool(n,a)})},gToolOk,
   {logged:function(j){var e=byStep(j.step);if(j.call.name==="log_sets"&&phase!=="finished")$("msg").textContent=t("loggedSet",{s:entryText(e)});progress()},
-   failed:function(j){if(phase!=="finished")$("msg").textContent=t("logRetry",{s:entryText(byStep(j.step))})}}):null;
+   failed:function(j){if(phase!=="finished")$("msg").textContent=t("logRetry",{s:entryText(byStep(j.step))})},
+   session_id:cfg.session_id}):null;
  function byStep(n){for(var i=0;i<completed.length;i++)if(completed[i].step===n)return completed[i];return null}
  function record(e){completed.push(e);if(LOG)LOG.add(e)}
  function report(){return{workout_bot:"guided_routine",session_id:cfg.session_id===undefined?null:cfg.session_id,routine_id:cfg.routine_id===undefined?null:cfg.routine_id,
