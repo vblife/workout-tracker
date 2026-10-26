@@ -307,23 +307,27 @@ def guided_steps(routine, default_rest_s=GUIDED_DEFAULT_REST_SECONDS, lang="en",
 
 
 COMPLETION_HANDOFF = {
-    "applies_to": "Offline fallback only: clients without MCP Apps, where the runner is a page rendered with "
-                  "render_timer_html.py. When the result has ui_auto_log true, the attached runner already logs each "
-                  "Done set and calls finish_workout itself; do not ask for the summary or log those sets again.",
-    "source": "the finished (or ended) guided runner page: its 'Completed sets' list and the JSON summary under it",
-    "rule": "Call log_sets only for steps the user marked Done. Never log skipped, unreached, or prescribed-only "
-            "steps. If the user stopped early without the summary, ask where they stopped before logging.",
-    "log_sets_fields": {
-        "exercise": "step exercise (canonical name)", "reps": "step reps, or what the user says they did",
-        "weight": "step weight", "unit": "step unit", "duration_s": "actual seconds for timed holds or untimed steps without reps",
-        "distance_m": "step distance_m", "is_warmup": "step is_warmup", "session_item_id": "step session_item_id",
-    },
-    "not_loggable": "Steps with loggable false (activity-only items such as a warm-up walk) are not sets; mark their "
-                    "session item completed with set_workout_item_status, or use log_activity when the user wants it recorded.",
-    "timing": "Log the completed sets in order, one log_sets call per set with performed_at set to that set's "
-              "done_at, before any other workout tool call. The active workout closes after 15 minutes without "
-              "logged activity, so backdating each set to when it was done keeps the sets in this workout.",
-    "after_logging": "Call finish_workout with this session_id when the user is done for the day.",
+    "applies_to": "Offline fallback only: clients without MCP Apps (ui_auto_log false, delivery offline_page), where "
+                  "the runner is a page rendered with render_timer_html.py. When the result has ui_auto_log true, the "
+                  "attached runner already logs each Done set and calls finish_workout itself; do not ask for the "
+                  "result or log those sets again.",
+    "source": "the page's Send to Workout Bot button: it sends a short line plus a line starting WORKOUT_BOT_GUIDED "
+              "followed by JSON {workout_bot, session_id, routine_id, ended, completed}. The page also keeps the "
+              "result on the device, so reopening it shows the same Send button.",
+    "rule": "When a message carries that result, immediately call log_guided_result with its session_id, completed "
+            "and ended. Do not ask questions first, do not call log_sets set by set, and do not call finish_workout: "
+            "log_guided_result backdates each Done set to its done_at, skips sets already saved, reopens the "
+            "runner's workout if it closed while the user trained offline, and finishes it. Never log skipped, "
+            "unreached, or prescribed-only steps.",
+    "without_result": "If the user says they are done but did not send the result, ask them to tap Send to Workout "
+                      "Bot on the finished page (reopening the page shows it again). If they cannot, ask where they "
+                      "stopped and log only what they confirm with log_sets; never guess.",
+    "not_loggable": "Steps with loggable false (activity-only items such as a warm-up walk) are not sets; "
+                    "log_guided_result marks their session item completed.",
+    "timing": "log_guided_result logs each set with performed_at set to its done_at, in done_at order, so the sets "
+              "land in this workout even though the active workout closes after 15 minutes without logged activity.",
+    "on_rejected": "status rejected means another workout is active now; nothing was saved. Ask the user which "
+                   "workout the sets belong to. needs_confirmation means an exercise is unknown; nothing was saved.",
 }
 
 
@@ -350,3 +354,162 @@ def guided_routine_timer(c, routine_id, lang="en", default_rest_s=GUIDED_DEFAULT
             "name": routine["name"], "lang": lang, "default_rest_s": default_rest_s,
             "work_sets": sum(1 for x in steps if x["kind"] != "rest"), "steps": steps,
             "completion_handoff": COMPLETION_HANDOFF}
+
+
+GUIDED_RESULT_ENDED = ("finished", "ended_early")
+
+
+class _GuidedAbort(Exception):
+    """Raised inside log_guided_result's transaction to roll every write back and return `result`."""
+    def __init__(self, result):
+        super().__init__(result.get("note") or result.get("status"))
+        self.result = result
+
+
+def _guided_set(entry, index):
+    """One Done entry from the runner page's summary -> one log_sets set (or a problem string)."""
+    exercise = entry.get("exercise") or entry.get("label")
+    if not isinstance(exercise, str) or not exercise.strip():
+        return None, f"entry {index}: missing exercise"
+    out = {"exercise": exercise}
+    for key in ("reps", "duration_s"):
+        value = entry.get(key)
+        if value is not None:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                return None, f"entry {index}: {key} must be a positive integer"
+            out[key] = value
+    for key in ("weight", "distance_m"):
+        value = entry.get(key)
+        if value is not None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+                return None, f"entry {index}: {key} must be a number >= 0"
+            out[key] = value
+    if out.get("weight") is not None and entry.get("unit") in ("lb", "kg"):
+        out["unit"] = entry["unit"]
+    if not any(k in out for k in ("reps", "duration_s", "distance_m")):
+        return None, f"entry {index}: needs reps, duration_s or distance_m"
+    out["is_warmup"] = entry.get("is_warmup") is True
+    item = entry.get("session_item_id")
+    if item is not None:
+        if isinstance(item, bool) or not isinstance(item, int) or item < 1:
+            return None, f"entry {index}: session_item_id must be a positive integer"
+        out["session_item_id"] = item
+    return out, None
+
+
+def log_guided_result(c, session_id, completed, ended="finished", finish=True):
+    """Write a guided runner's Done sets back into its own workout in one atomic call, then finish it.
+
+    For the offline page (no MCP Apps), whose summary reaches the bot only after the user returns. Each Done
+    entry becomes one set backdated to its done_at, in done_at order. Idempotent: a set already saved for the
+    same exercise, session item and time is skipped, so sending the same result twice logs nothing new. The
+    workout may already have been closed by the 15-minute inactivity rule while the user trained offline (an
+    offline run logs nothing until the end); it is then reopened for these sets and finished again, unless
+    another workout is active, in which case nothing is saved. Unknown exercises save nothing
+    (needs_confirmation). Entries with loggable false mark their session item completed instead."""
+    import core
+    if isinstance(session_id, bool) or not isinstance(session_id, int) or session_id < 1:
+        raise _error("session_id must be a positive integer")
+    if not isinstance(completed, list):
+        raise _error("completed must be the runner summary's completed list")
+    if ended not in GUIDED_RESULT_ENDED:
+        raise _error("ended must be finished or ended_early")
+    session = c.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+    if not session:
+        raise _error(f"workout #{session_id} does not exist")
+    if session["start_mode"] != "routine":
+        raise _error(f"workout #{session_id} was not started from a routine, so it is not a guided runner workout")
+    tz = core.user_timezone(c)
+    started = workouts._dt(session["started_at"])
+    plan, items, problems = [], [], []
+    for index, entry in enumerate(completed):
+        if not isinstance(entry, dict):
+            problems.append({"index": index, "error": "entry must be an object"}); continue
+        if entry.get("loggable") is False:
+            item = entry.get("session_item_id")
+            if isinstance(item, int) and not isinstance(item, bool) and item > 0:
+                items.append(item)
+            continue
+        value, problem = _guided_set(entry, index)
+        if problem:
+            problems.append({"index": index, "error": problem}); continue
+        try:
+            at = core._parse_time(entry.get("done_at"), tz) if entry.get("done_at") else None
+        except (TypeError, ValueError):
+            problems.append({"index": index, "error": "done_at must be an ISO time"}); continue
+        resolved = core.resolve_one(c, value["exercise"])
+        if resolved["status"] != "matched":
+            problems.append({"index": index, "input": value["exercise"], "status": resolved["status"],
+                             "candidates": resolved["candidates"]}); continue
+        plan.append({"index": index, "at": at, "set": value, "exercise_id": resolved["exercise_id"]})
+    if problems:
+        return {"status": "needs_confirmation", "session_id": session_id, "logged": [], "problems": problems,
+                "note": "Nothing was saved. Fix or confirm these entries, then send the result again."}
+    now = workouts._dt()
+    for step in plan:  # a Done time before the workout started (clock skew) or missing is pinned inside it
+        at = step["at"] or now
+        step["at"] = max(at, started)
+    plan.sort(key=lambda s: (s["at"], s["index"]))
+    todo, duplicates = [], 0
+    for step in plan:
+        if c.execute("""SELECT 1 FROM sets WHERE session_id=? AND exercise_id=? AND performed_at=?
+                AND coalesce(session_item_id,0)=coalesce(?,0) LIMIT 1""",
+                (session_id, step["exercise_id"], workouts._iso(step["at"]), step["set"].get("session_item_id"))).fetchone():
+            duplicates += 1
+        else:
+            todo.append(step)
+    if items:  # only items that still need marking count as work to write back
+        items = [row[0] for row in c.execute(
+            f"SELECT id FROM workout_session_items WHERE session_id=? AND status!='completed' AND id IN ({','.join('?' * len(items))})",
+            (session_id, *items))]
+    active = c.execute("SELECT id FROM sessions WHERE status='in_progress'").fetchone()
+    active_id = active["id"] if active else None
+    status_before = session["status"]
+    if status_before != "in_progress" and (todo or items) and active_id is not None:
+        return {"status": "rejected", "reason": "other_workout_active", "session_id": session_id, "logged": [],
+                "session_status": status_before, "active_session_id": active_id,
+                "note": (f"Nothing saved: workout #{session_id} had already ended ({status_before}) and workout "
+                         f"#{active_id} is active now. Ask the user which workout these sets belong to.")}
+    logged, reopened = [], False
+    try:
+        with dbm.transaction(c):
+            if status_before != "in_progress" and (todo or items):
+                first = todo[0]["at"] if todo else now
+                c.execute("UPDATE sessions SET status='in_progress',ended_at=NULL,last_activity_at=? WHERE id=?",
+                          (workouts._iso(first), session_id))
+                c.execute("UPDATE workout_session_items SET status='pending' WHERE session_id=? AND status='skipped'",
+                          (session_id,))
+                reopened = True
+            for step in todo:
+                # A long rest inside the run is not inactivity: keep the workout open up to each Done time.
+                c.execute("UPDATE sessions SET last_activity_at=max(coalesce(last_activity_at,started_at),?) "
+                          "WHERE id=? AND status='in_progress'", (workouts._iso(step["at"]), session_id))
+                r = core.log_sets(c, [step["set"]], performed_at=workouts._iso(step["at"]), session_id=session_id)
+                if r.get("status") != "logged":
+                    raise _GuidedAbort({"status": r.get("status") or "rejected", "session_id": session_id, "logged": [],
+                                        "entry": step["index"], "detail": r,
+                                        "note": r.get("note") or f"Nothing saved: entry {step['index']} could not be logged."})
+                logged.extend(r["logged"])
+            for item in items:
+                c.execute("""UPDATE workout_session_items SET status='completed'
+                    WHERE id=? AND session_id=? AND status IN ('pending','skipped')""", (item, session_id))
+            finished = None
+            if finish:
+                current = c.execute("SELECT status,last_activity_at FROM sessions WHERE id=?", (session_id,)).fetchone()
+                if current["status"] == "in_progress":
+                    last = workouts._dt(current["last_activity_at"]) if (todo or reopened) else now
+                    finished = workouts.finish_workout(c, at=max(last, started), session_id=session_id)
+    except _GuidedAbort as abort:
+        return abort.result
+    final = c.execute("SELECT status,ended_at FROM sessions WHERE id=?", (session_id,)).fetchone()
+    note = f"Saved {len(logged)} set(s) to workout #{session_id}"
+    if duplicates:
+        note += f"; {duplicates} were already saved and were skipped"
+    if reopened:
+        note += f"; the workout had closed while the user trained offline ({status_before}) and was reopened for them"
+    note += f". Workout status: {final['status']}."
+    return {"status": "logged" if logged else ("already_logged" if duplicates else "nothing_to_log"),
+            "session_id": session_id, "ended": ended, "logged": logged, "already_logged": duplicates,
+            "items_completed": items, "reopened": reopened, "session_status": final["status"],
+            "ended_at": final["ended_at"], "finished": final["status"] == "completed", "note": note,
+            "workout": finished if isinstance(finished, dict) else None}
