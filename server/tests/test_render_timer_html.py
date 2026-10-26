@@ -53,7 +53,7 @@ class TimerTemplateTest(unittest.TestCase):
     def test_template_has_screen_off_safeguards(self):
         html = template()
         for needle in ("navigator.wakeLock", "visibilitychange", "AudioContext", "navigator.vibrate",
-                       "data:video/mp4;base64,", "data:video/webm;base64,", "Date.now()", "playsinline", 'id="awake"'):
+                       "Date.now()", 'id="awake"'):
             self.assertIn(needle, html)
         self.assertNotIn("setInterval(function(){left--", html)
 
@@ -551,19 +551,45 @@ class TimerTickTest(unittest.TestCase):
         self.assertEqual(data[-1], 0)
 
     def test_audio_never_registers_a_media_session(self):
-        # Sound is Web Audio only. An <audio> element, MediaMetadata, media action handlers or audioSession
-        # "playback" make iOS/Android show a Now Playing / media card on Start and pause other apps' audio.
+        # Sound is Web Audio only. Any media element, any Media Session API access, or audioSession "playback"
+        # can make iOS/Android (or the host app of an in-app webview) show a Now Playing / media card on Start
+        # and pause other apps' audio. The templates checked here are what the bot actually sends.
+        for html in (template(), r.render({"duration_s": 30}, template()), r.render({"mode": "guided", "steps": [
+                {"kind": "work", "label": "Squat", "sets": 1, "set_index": 1, "reps": 5}]}, template())):
+            self.assertNotRegex(html, r"(?i)<audio\b|<video\b|new Audio\(|createElement\([\"'](?:audio|video)")
+            self.assertNotRegex(html, r"(?i)data:(?:audio|video)/")
+            self.assertNotRegex(html, r"\.play\(")  # no HTMLMediaElement.play()
+            self.assertNotIn("mediaSession", html)  # not even reads or clears: WebKit creates a session on access
+            self.assertNotIn("MediaMetadata", html)
+            self.assertNotIn("setActionHandler", html)
+            self.assertNotIn("setPositionState", html)
+            self.assertNotIn("playbackState", html)
+            self.assertNotRegex(html, r"audioSession\.type\s*=\s*[\"'](?!ambient[\"'])")  # only ever "ambient"
+            self.assertIn('navigator.audioSession.type="ambient"', html)
+            self.assertNotRegex(html, r"id=[\"']?nosleep|disableRemotePlayback|playsinline")
         html = template()
-        self.assertNotRegex(html, r"(?i)<audio\b|new Audio\(|createElement\([\"']audio")
-        self.assertNotIn("MediaMetadata", html)
-        self.assertNotIn("audio/wav", html)
-        self.assertNotRegex(html, r'audioSession\.type\s*=\s*"playback"')
-        self.assertIn('navigator.audioSession.type="ambient"', html)
-        self.assertEqual(re.findall(r"setActionHandler\(([^)]*)\)", html), ["a,null"])  # only ever cleared
-        self.assertEqual(html.count("quietMedia();"), 3)  # countdown resume, guided begin and guided resume
+        self.assertEqual(html.count("ambientAudio();"), 4)  # at load, countdown resume, guided begin and resume
+        self.assertIn('catch(e){}}\nambientAudio();\n', html)  # top-level call at load, before any tap
         self.assertEqual(html.count("createOscillator"), 1)  # only the cue tone(); no hidden hum oscillator
         self.assertIn("createBuffer(1,1,22050)", html)  # the unlock buffer is one zero sample
-        self.assertEqual(html.count('<video id="nosleep" muted'), 1)  # muted, no audio track: no media card
+
+    def test_ambient_audio_session_set_before_audio_context_on_every_start(self):
+        html = template()
+        for fn in ("function resume(){", "function begin(){"):
+            i = html.index(fn)
+            body = html[i:html.index("}", html.index("ensureAudio()", i))]
+            self.assertLess(body.index("ambientAudio()"), body.index("ensureAudio()"), fn)
+        i = html.index('else if(phase==="paused")')
+        self.assertLess(html.index("ambientAudio()", i), html.index("ensureAudio()", i))
+
+    def test_keep_awake_is_wake_lock_only(self):
+        html = template()
+        start = html.index("function acquireAwake(")
+        code = html[start:html.index("function status(", start)]
+        self.assertIn('navigator.wakeLock.request("screen")', code)
+        self.assertNotRegex(code, r"(?i)video|audio|\.play\(")
+        self.assertNotIn("wlVideo", html)
+        self.assertIn('awakeMode="none"', code)  # refused or missing wake lock: status asks to keep the screen on
 
     def test_cli_no_tick(self):
         with tempfile.TemporaryDirectory() as tmp:
