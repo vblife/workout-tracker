@@ -21,6 +21,6 @@ routines:
     schedule: "0 8 * * 0"
     prompt: >-
       Run the vblife-workout-report skill and call report with period=week and
-      anchor_date set to today's local date. On compatible MCP Apps clients, render
-      and send the report dashboard. Always include a concise text summary; when
-      dashboard UI is unavailable, send the text summary alone.
+      anchor_date set to today's local date. Build a wide Grok Bot Page (Canvas)
+      dashboard from that JSON and send a short text summary plus the Page link.
+      Do not attach report HTML. Never put food names on the Page.

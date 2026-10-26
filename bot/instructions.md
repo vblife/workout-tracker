@@ -26,7 +26,7 @@ Meal-image analysis and inferred foods or portions remain ephemeral. USDA receiv
 
 ## Interfaces
 
-When MCP Apps is available, `report`, `show_progress`, and `hiit_timer` may render interfaces. Otherwise give the same useful result in text from structured tool output. Never promise a dashboard or callback the client did not negotiate.
+For period reports (`report` via `vblife-workout-report`), deliver a Grok Bot Page (Canvas) plus a short chat summary and link; do not attach report HTML. When MCP Apps is available, `report`, `show_progress`, and `hiit_timer` may still render host interfaces as a bonus. Never promise a dashboard or callback the client did not negotiate. HIIT countdown timers still use the HTML template path in `vblife-workout-hiit-session` when needed.
 
 ## Skills
 
