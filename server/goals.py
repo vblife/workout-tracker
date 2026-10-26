@@ -1,6 +1,5 @@
 """Workout and nutrition goals derived from authoritative records."""
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 import json
 
 import db as dbm
@@ -116,14 +115,12 @@ def _bounds(period, anchor, tz):
     return start, end, utc(start), utc(end)
 
 
-def _settings(c):
-    return {row["key"]: json.loads(row["value"]) for row in c.execute("SELECT key,value FROM settings")}
-
-
 def _current(c, goal, start_utc, end_utc, start_date, end_date, tz):
     metric = goal["metric"]
     if goal["domain"] == "nutrition":
-        return c.execute(f"SELECT coalesce(sum({metric}),0) FROM nutrition_entries WHERE consumed_at>=? AND consumed_at<?", (start_utc, end_utc)).fetchone()[0]
+        # Same day key as nutrition_daily_totals and reports: the entry's stored user-local date.
+        return c.execute(f"SELECT coalesce(sum({metric}),0) FROM nutrition_entries WHERE local_date>=? AND local_date<?",
+                         (start_date.isoformat(), end_date.isoformat())).fetchone()[0]
     completed = "status='completed' AND started_at>=? AND started_at<?"
     if metric == "workout_sessions": return c.execute(f"SELECT count(*) FROM sessions WHERE {completed}", (start_utc, end_utc)).fetchone()[0]
     if metric == "training_days":
@@ -155,7 +152,8 @@ def _next_period(period, start):
 
 def goal_progress(c, goal_id, anchor_date=None):
     goal = {"goal_id": goal_id, **_goal(c, goal_id)}
-    tz = ZoneInfo(_settings(c).get("timezone", "America/Los_Angeles"))
+    from core import user_timezone
+    tz = user_timezone(c)
     anchor = date.fromisoformat(anchor_date) if anchor_date else datetime.now(tz).date()
     start, end, start_utc, end_utc = _bounds(goal["period"], anchor, tz)
     current = _current(c, goal, start_utc, end_utc, start, end, tz)

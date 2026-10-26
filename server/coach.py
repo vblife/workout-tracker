@@ -49,7 +49,7 @@ def suggest_next(c,exercise,target_rep_range=None,sets=None,now=None):
          "reps":f"No history. Do {n_sets} sets of as many good reps as possible (stop 1-2 short of failure).",
          "duration":"No history. Do 3 holds of 30s.","distance":"No history. Start easy: 20-30 min conversational pace."}[ex["tracking"]]
     return {**base,"status":"no_history","sets":n_sets,"reps":lo if ex["tracking"]=="reps_weight" else None,"weight":None,"rationale":tip}
-  last=hist[0]; days=(now-_parse_time(last["t"])).days
+  last=hist[0]; days=(now-_parse_time(last["t"],tz)).days
   L=last["sets"]; last_desc=", ".join(
     f"{s['reps'] or ''}{'x' if s['reps'] else ''}{to_unit(s['weight_kg'],unit) if s['weight_kg'] is not None else 'BW'}" if ex["tracking"] in("reps_weight","reps")
     else f"{s['duration_s'] or 0}s" if ex["tracking"]=="duration" else f"{s['distance_m'] or 0}m" for s in L)
@@ -95,7 +95,7 @@ def _last_trained(c):
   return out
 def daily_plan_context(c,date=None,now=None):
   """Facts + rule-based focus suggestion for composing today's plan (the LLM writes the plan)."""
-  s=get_settings(c); unit=display_unit(c); tz=user_timezone(c); now=now or datetime.now(timezone.utc)
+  s=get_settings(c); unit=display_unit(c); tzs=core.timezone_status(c,s); tz=user_timezone(c,s); now=now or datetime.now(timezone.utc)
   day=datetime.fromisoformat(date).date() if date else now.astimezone(tz).date()
   wk=day-timedelta(days=day.weekday()); wk_utc=_iso(datetime.combine(wk,datetime.min.time(),tz))
   sess=c.execute("SELECT * FROM sessions WHERE started_at>=? ORDER BY started_at",(wk_utc,)).fetchall()
@@ -103,7 +103,7 @@ def daily_plan_context(c,date=None,now=None):
   trained_today=day.isoformat() in days_done
   target=s.get("days_per_week") or 4; remaining_days=6-day.weekday()+1
   need=max(0,target-len(days_done))
-  lt=_last_trained(c); hrs=lambda t:(now-_parse_time(t)).total_seconds()/3600
+  lt=_last_trained(c); hrs=lambda t:(now-_parse_time(t,tz)).total_seconds()/3600
   groups={}
   for g,ms in GROUPS.items():
     ts=[lt[m] for m in ms if m in lt]; h=min(hrs(t) for t in ts) if ts else None
@@ -148,7 +148,7 @@ def daily_plan_context(c,date=None,now=None):
     # prefer known exercises, then available ones; cap
     cands.sort(key=lambda i:(-i["times_logged"],i["equipment_status"]!="available"))
     cands=cands[:12]
-  return {"date":day.isoformat(),"weekday":day.strftime("%A"),"unit":unit,"settings":{k:s.get(k) for k in("days_per_week","goals","equipment","session_minutes","injuries")},
+  return {"date":day.isoformat(),"weekday":day.strftime("%A"),**tzs,"unit":unit,"settings":{k:s.get(k) for k in("days_per_week","goals","equipment","session_minutes","injuries")},
     "equipment_known":bool(s.get("equipment")),"week":{"days_trained":days_done,"target":target,"still_needed":need,"days_left_incl_today":remaining_days,"trained_today":trained_today,
       "cardio_minutes":cm_this,"cardio_minutes_last_week":cm_prev,"cardio_cap_10pct":round(max(cm_prev,30)*1.1),"hikes":len(hikes)},
     "muscle_recovery":groups,"suggested_focus":focus,"rest_recommended":rest,"rationale":why,"candidate_exercises":cands,

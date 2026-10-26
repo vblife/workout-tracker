@@ -18,6 +18,11 @@ def _error(message):
     return UserError(message)
 
 
+def _user_timezone_name(c):
+    from core import user_timezone_name
+    return user_timezone_name(c)
+
+
 def nutrition_status(c, environ=None):
     environ = os.environ if environ is None else environ
     settings = {row["key"]: json.loads(row["value"]) for row in c.execute("SELECT key,value FROM settings")}
@@ -26,7 +31,13 @@ def nutrition_status(c, environ=None):
             "mode": "usda_hybrid" if environ.get("USDA_FDC_API_KEY") else "model_only"}
 
 
-def validate_draft(payload):
+def validate_draft(payload, default_timezone=None):
+    """Normalize a nutrient-only draft.
+
+    capture_timezone defaults to default_timezone (the user's timezone; never UTC). A consumed_at with no
+    zone/offset is wall time in capture_timezone, i.e. user-local. local_date is the consumed day in
+    capture_timezone and is the day key used by daily totals, nutrition goals, and reports.
+    """
     if not isinstance(payload, dict):
         raise _error("nutrition draft must be an object")
     extra = sorted(set(payload) - ALLOWED)
@@ -45,16 +56,19 @@ def validate_draft(payload):
     flags = payload.get("uncertainty_flags") or []
     if not isinstance(flags, list) or any(flag not in FLAGS for flag in flags):
         raise _error("uncertainty_flags contains an unsupported generic flag")
+    capture_timezone = payload.get("capture_timezone") or default_timezone
+    if not capture_timezone:
+        raise _error("capture_timezone is required when the user's timezone is unknown")
     consumed_at = payload.get("consumed_at") or dbm.now()
     try:
+        zone = ZoneInfo(capture_timezone)
         instant = datetime.fromisoformat(consumed_at.replace("Z", "+00:00"))
         if instant.tzinfo is None:
-            raise ValueError
+            instant = instant.replace(tzinfo=zone)  # no zone = user-local wall time
         instant = instant.astimezone(timezone.utc)
-        capture_timezone = payload.get("capture_timezone") or "UTC"
-        local_date = instant.astimezone(ZoneInfo(capture_timezone)).date().isoformat()
-    except (ValueError, TypeError, KeyError):
-        raise _error("consumed_at needs an ISO timestamp with offset and capture_timezone needs an IANA zone")
+        local_date = instant.astimezone(zone).date().isoformat()
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise _error("consumed_at needs an ISO timestamp and capture_timezone needs an IANA zone")
     return {**clean, "consumed_at": instant.isoformat().replace("+00:00", "Z"), "capture_timezone": capture_timezone,
             "local_date": local_date, "estimation_method": method, "confidence": confidence,
             "usda_contributed": bool(payload.get("usda_contributed", method == "usda_hybrid")),
@@ -76,7 +90,7 @@ def _entry(c, entry_id):
 def save_entry(c, payload, confirmed=False):
     if confirmed is not True:
         raise _error("explicit user confirmation is required before saving nutrition")
-    draft = validate_draft(payload)
+    draft = validate_draft(payload, _user_timezone_name(c))
     now = dbm.now()
     values = [draft[name] for name in NUTRIENTS]
     with dbm.transaction(c):
@@ -94,7 +108,7 @@ def update_entry(c, entry_id, payload, confirmed=False):
     _entry(c, entry_id)
     if confirmed is not True:
         raise _error("explicit user confirmation is required before updating nutrition")
-    draft = validate_draft(payload)
+    draft = validate_draft(payload, _user_timezone_name(c))
     values = [draft[name] for name in NUTRIENTS]
     c.execute("""UPDATE nutrition_entries SET consumed_at=?,capture_timezone=?,local_date=?,
         calories_kcal=?,protein_g=?,carbohydrates_g=?,fat_g=?,fiber_g=?,saturated_fat_g=?,sugar_g=?,sodium_mg=?,
