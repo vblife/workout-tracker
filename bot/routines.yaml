@@ -6,7 +6,7 @@
 # dashboard from its JSON, and send a short chat summary plus the Page link.
 #   - Daily report: evening, about 20:30 local (flexible; move it if the user
 #     usually finishes training or eating later). Compares today vs yesterday.
-#   - Weekly report: Sunday 08:00 local. Compares this week vs the prior week.
+#   - Weekly report: Sunday 21:00 local. Compares this week vs the prior week.
 routines:
   - slug: workout-daily-plan
     name: Daily plan
@@ -33,7 +33,7 @@ routines:
       Page link. Do not attach report HTML. Never put food names on the Page.
   - slug: workout-weekly-report
     name: Weekly report
-    schedule: "0 8 * * 0"
+    schedule: "0 21 * * 0"
     prompt: >-
       Run the vblife-workout-report skill and call report with period=week and
       anchor_date set to today's local date. Build a wide Grok Bot Page (Canvas)

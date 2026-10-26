@@ -65,7 +65,7 @@ class ProductContractTest(unittest.TestCase):
         self.assertIn("text summary", daily.lower())
         self.assertIn("food names", daily)
         weekly = routines.split("  - slug: workout-weekly-report\n", 1)[1]
-        self.assertIn('schedule: "0 8 * * 0"', weekly)
+        self.assertIn('schedule: "0 21 * * 0"', weekly)
         self.assertIn("period=week", weekly)
         self.assertIn("anchor_date", weekly)
         self.assertIn("dashboard", weekly.lower())
@@ -81,7 +81,7 @@ class ProductContractTest(unittest.TestCase):
         for expected in ("# Workout Bot", "/home/vblife/workout", "/workspace/vblife/workout-data/workout.db",
                          "USDA_FDC_API_KEY", "https://fdc.nal.usda.gov/api-key-signup/", "MCP Apps",
                          "npm run eval:workout", "python3 -m unittest", "daily plan", "workout reminder",
-                         "weekly report Sunday at 08:00"):
+                         "weekly report Sunday at 21:00"):
             self.assertIn(expected, text)
         self.assertNotIn("Workout Tracker", text)
         self.assertNotIn("/home/box/workout", text)
