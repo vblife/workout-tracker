@@ -1,5 +1,6 @@
 """Reusable workout routines and immutable active-workout snapshots."""
 import json
+import re
 
 import db as dbm
 import workouts
@@ -9,6 +10,8 @@ ROUTINE_TYPES = ("standard", "hiit")
 DEFAULT_WORK_SECONDS = 40
 DEFAULT_REST_SECONDS = 20
 MAX_ROUNDS = 100
+GUIDED_DEFAULT_REST_SECONDS = 90  # C1: rest after a standard-routine set when the item has no rest_seconds
+MAX_GUIDED_STEPS = 2000
 
 
 def _error(message):
@@ -133,8 +136,9 @@ def _check_type_fields(routine_type, items, rounds, round_options):
     if routine_type != "hiit":
         if rounds is not None or round_options:
             raise _error("rounds and round_options apply only to hiit routines")
-        if any(x.get("work_seconds") is not None or x.get("rest_seconds") is not None for x in items or []):
-            raise _error("work_seconds and rest_seconds apply only to hiit routines")
+        # Standard items may carry rest_seconds (rest after each set in the guided runner); work_seconds stays HIIT-only.
+        if any(x.get("work_seconds") is not None for x in items or []):
+            raise _error("work_seconds applies only to hiit routines; standard items use target_duration_s for timed holds")
 
 
 def _hiit_defaults(items):
@@ -233,3 +237,110 @@ def start_routine(c, routine_id, idempotency_key=None, allow_archived=False, at=
     return workouts.start_workout(c, mode="routine", title=routine["name"], items=items,
                                   source_routine_id=routine_id, idempotency_key=idempotency_key,
                                   planned_duration_min=routine["estimated_duration_min"], at=at)
+
+
+_WARMUP = re.compile(r"warm[\s_-]*up|\u70ed\u8eab", re.I)
+_COOLDOWN = re.compile(r"cool[\s_-]*down|stretch|\u653e\u677e|\u62c9\u4f38", re.I)
+
+
+def _item_phase(item):
+    """warmup | cooldown | work, from the item's own text (activity name or notes)."""
+    text = " ".join(str(item.get(k) or "") for k in ("activity_name", "notes"))
+    if _WARMUP.search(text):
+        return "warmup"
+    if _COOLDOWN.search(text):
+        return "cooldown"
+    return "work"
+
+
+def _rest_seconds_arg(value):
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 3600:
+        raise _error("default_rest_s must be a whole number of seconds from 0 to 3600")
+    return value
+
+
+def guided_steps(routine, default_rest_s=GUIDED_DEFAULT_REST_SECONDS, lang="en", unit="kg", session_items=None):
+    """Ordered guided-runner steps for a standard routine.
+
+    Each item becomes target_sets work steps (1 when unset) carrying its prescription. A rest step follows
+    every work step except the last one overall: the item's rest_seconds when set (0 = none), otherwise
+    default_rest_s for working sets. Warm-up and cool-down items (named so in activity_name or notes) rest only
+    when they set rest_seconds themselves. A work step counts down only when the item has target_duration_s;
+    otherwise the runner counts up from 0 until the user taps Done. session_items maps routine_item_id to the
+    active-workout session item id, which log_sets accepts as session_item_id.
+    """
+    if routine["routine_type"] != "standard":
+        raise _error(f"routine {routine['routine_id']} is a {routine['routine_type']} routine; use hiit_timer to time it")
+    if lang not in ("en", "zh"):
+        raise _error("lang must be en or zh")
+    default_rest_s = _rest_seconds_arg(default_rest_s)
+    import core
+    session_items = session_items or {}
+    steps = []
+    for item in routine["items"]:
+        phase = _item_phase(item)
+        exercise = item.get("exercise") or item.get("activity_name")
+        label = (item.get("exercise_zh") if lang == "zh" else None) or exercise
+        sets = item.get("target_sets") or 1
+        duration = item.get("target_duration_s")
+        weight = core.to_unit(item["target_weight_kg"], unit) if item.get("target_weight_kg") is not None else None
+        rest = item.get("rest_seconds")
+        if rest is None:
+            rest = default_rest_s if phase == "work" else 0
+        for index in range(1, sets + 1):
+            steps.append({
+                "kind": phase, "exercise": exercise, "label": label, "name_zh": item.get("exercise_zh"),
+                "set_index": index, "sets": sets, "reps": item.get("target_reps"),
+                "weight": weight, "unit": unit if weight is not None else None,
+                "duration_s": duration, "distance_m": item.get("target_distance_m"), "notes": item.get("notes"),
+                "timer": "countdown" if duration else "countup", "is_warmup": phase == "warmup",
+                "loggable": item.get("exercise_id") is not None,
+                "routine_item_id": item["routine_item_id"], "session_item_id": session_items.get(item["routine_item_id"]),
+            })
+            if rest:
+                steps.append({"kind": "rest", "seconds": rest})
+    while steps and steps[-1]["kind"] == "rest":  # no rest after the final step
+        steps.pop()
+    if len(steps) > MAX_GUIDED_STEPS:
+        raise _error(f"routine expands to more than {MAX_GUIDED_STEPS} steps")
+    return steps
+
+
+COMPLETION_HANDOFF = {
+    "source": "the finished (or ended) guided runner page: its 'Completed sets' list and the JSON summary under it",
+    "rule": "Call log_sets only for steps the user marked Done. Never log skipped, unreached, or prescribed-only "
+            "steps. If the user stopped early without the summary, ask where they stopped before logging.",
+    "log_sets_fields": {
+        "exercise": "step exercise (canonical name)", "reps": "step reps, or what the user says they did",
+        "weight": "step weight", "unit": "step unit", "duration_s": "actual seconds for timed holds or untimed steps without reps",
+        "distance_m": "step distance_m", "is_warmup": "step is_warmup", "session_item_id": "step session_item_id",
+    },
+    "not_loggable": "Steps with loggable false (activity-only items such as a warm-up walk) are not sets; mark their "
+                    "session item completed with set_workout_item_status, or use log_activity when the user wants it recorded.",
+    "timing": "Log the completed sets in order, one log_sets call per set with performed_at set to that set's "
+              "done_at, before any other workout tool call. The active workout closes after 15 minutes without "
+              "logged activity, so backdating each set to when it was done keeps the sets in this workout.",
+    "after_logging": "Call finish_workout when the user is done for the day.",
+}
+
+
+def guided_routine_timer(c, routine_id, lang="en", default_rest_s=GUIDED_DEFAULT_REST_SECONDS, idempotency_key=None):
+    """Start a standard routine (start_routine) and return the guided-runner config for render_timer_html.py."""
+    import core
+    routine = _routine(c, routine_id)
+    if routine["routine_type"] == "hiit":
+        raise _error(f"routine {routine_id} is a hiit routine; use hiit_timer with routine_id for timed circuits")
+    if lang not in ("en", "zh"):
+        raise _error("lang must be en or zh")
+    _rest_seconds_arg(default_rest_s)
+    replay = bool(idempotency_key) and c.execute("SELECT 1 FROM sessions WHERE idempotency_key=?",
+                                                 (idempotency_key,)).fetchone() is not None
+    started = start_routine(c, routine_id, idempotency_key=idempotency_key)
+    session_items = {x["source_routine_item_id"]: x["id"] for x in started["items"]
+                     if x.get("source_routine_item_id") is not None and x.get("status") != "replaced"}
+    steps = guided_steps(routine, default_rest_s, lang, core.display_unit(c), session_items)
+    # start_workout's own "status" key is overwritten by the session's status, so report started/replayed here.
+    return {"mode": "guided", "status": "already_started" if replay else "started", "session_id": started["session_id"], "routine_id": routine_id,
+            "name": routine["name"], "lang": lang, "default_rest_s": default_rest_s,
+            "work_sets": sum(1 for x in steps if x["kind"] != "rest"), "steps": steps,
+            "completion_handoff": COMPLETION_HANDOFF}
