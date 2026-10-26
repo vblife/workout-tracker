@@ -307,6 +307,9 @@ def guided_steps(routine, default_rest_s=GUIDED_DEFAULT_REST_SECONDS, lang="en",
 
 
 COMPLETION_HANDOFF = {
+    "applies_to": "Offline fallback only: clients without MCP Apps, where the runner is a page rendered with "
+                  "render_timer_html.py. When the result has ui_auto_log true, the attached runner already logs each "
+                  "Done set and calls finish_workout itself; do not ask for the summary or log those sets again.",
     "source": "the finished (or ended) guided runner page: its 'Completed sets' list and the JSON summary under it",
     "rule": "Call log_sets only for steps the user marked Done. Never log skipped, unreached, or prescribed-only "
             "steps. If the user stopped early without the summary, ask where they stopped before logging.",
@@ -325,7 +328,10 @@ COMPLETION_HANDOFF = {
 
 
 def guided_routine_timer(c, routine_id, lang="en", default_rest_s=GUIDED_DEFAULT_REST_SECONDS, idempotency_key=None):
-    """Start a standard routine (start_routine) and return the guided-runner config for render_timer_html.py."""
+    """Start a standard routine (start_routine) and return the guided-runner config.
+
+    MCP Apps clients show it in the attached runner view (ui://workout/guided.html), which logs each Done set;
+    other clients render it offline with render_timer_html.py and log from completion_handoff."""
     import core
     routine = _routine(c, routine_id)
     if routine["routine_type"] == "hiit":

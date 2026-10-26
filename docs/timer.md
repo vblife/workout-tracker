@@ -86,11 +86,24 @@ preview that starts no workout (`--default-rest SECONDS` changes the 90 s defaul
   distance_m, is_warmup, loggable, session_item_id, elapsed_s, done_at, ...}]}`. For a timed hold, `duration_s`
   is the seconds actually held (capped at the target); for an untimed step with no reps or distance it is the
   elapsed time.
-- **Logging.** The page makes no network calls. `guided_routine_timer` already started the workout
-  (`start_routine`); the bot then calls `log_sets` only for the completed entries, one call per set in order
-  with `performed_at = done_at` and the entry's `session_item_id` (see `completion_handoff`), and
-  `finish_workout`. Backdating matters because an active workout closes after 15 minutes without logged
-  activity.
+- **Logging (offline page, fallback).** The rendered file makes no network calls. `guided_routine_timer`
+  already started the workout (`start_routine`); the bot then calls `log_sets` only for the completed entries,
+  one call per set in order with `performed_at = done_at` and the entry's `session_item_id` (see
+  `completion_handoff`), and `finish_workout`. Backdating matters because an active workout closes after 15
+  minutes without logged activity.
+- **Logging (MCP Apps, primary).** When the client negotiates the `io.modelcontextprotocol/ui` extension,
+  `guided_routine_timer` carries `_meta.ui.resourceUri = ui://workout/guided.html`, which serves this same
+  template, and its result gains `ui_auto_log: true`. The view gets its config from
+  `ui/notifications/tool-result` and talks to the host over the MCP Apps postMessage bridge (`ui/initialize`,
+  `tools/call`, `ui/update-model-context`, `ui/notifications/size-changed`, `ui/resource-teardown`), like the
+  HIIT widget. Each Done set (or timed hold reaching 0) is logged at once with one `log_sets` call
+  (`performed_at = done_at`, `session_item_id`); a `loggable: false` step with a session item is marked
+  completed with `set_workout_item_status`. Calls run one at a time in order, once per step. On End workout or
+  the natural finish the page waits for pending calls, retries a failed call once (never a timed-out one,
+  which may have been saved), and then calls `finish_workout`, without asking, even when nothing was marked
+  Done. Skipped and unreached sets are never logged. If a set still could not be saved, `finish_workout` is not
+  called and the page falls back to the offline summary with the unlogged steps (`auto_log` in the JSON) so the
+  bot can log them. Without the bridge (the rendered file, or a host without MCP Apps) nothing is sent.
 - **Cache.** `session_id` and the per-step `session_item_id`s (stored as a top-level `session_item_ids` list)
   are per-run fields like `hiit_id`: they are left out of the cache key and patched into the out file, so
   starting the same routine again reuses the cached page.
