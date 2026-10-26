@@ -4,7 +4,7 @@ description: Use when the user requests a daily, weekly, monthly, quarterly, ann
 ---
 # Reports and dashboards
 
-Call `report` with `day`, `week`, `month`, `quarter`, `year`, or `all` and an anchor date when supplied. Do not require setup first. Use the structured JSON from that call as the only source of numbers; never invent totals, trends, or goal rates.
+Call `report` with `day`, `week`, `month`, `quarter`, `year`, or `all` and an anchor date when supplied. Days and periods are user-local in the user's saved timezone; a missing anchor date means today's user-local date. Do not require setup first. If the result has `timezone_missing: true`, still deliver the report and ask the user once for their timezone as described in `vblife-workout-config`. Use the structured JSON from that call as the only source of numbers; never invent totals, trends, or goal rates.
 
 ## Primary delivery: Grok Bot Page (Canvas)
 

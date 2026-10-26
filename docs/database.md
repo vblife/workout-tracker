@@ -51,3 +51,19 @@ which some test modules import directly for plain `unittest` runs, adds two safe
 
 - It points `WORKOUT_DB` at a throwaway file. CLI subprocesses inherit it.
 - It makes `db.connect` and `db.connect_readonly` raise if they resolve to `db.DEFAULT_DB`.
+
+## Time fields and the user-local timezone
+
+All instants (`sets.performed_at`, `sessions.started_at`, `body_weight.measured_at`, `nutrition_entries.consumed_at`,
+and similar) are stored as UTC ISO strings ending in `Z`. A timestamp a tool receives without a zone or offset is
+user-local wall time in `settings.timezone` and is converted to UTC before it is stored. Day, week, and month
+boundaries are computed in `settings.timezone`. When that setting is unset, the server uses the host's local zone and
+reports `timezone_missing: true`; it never falls back to a hard-coded Pacific or UTC zone.
+
+`nutrition_entries` carries two extra time columns:
+
+- `capture_timezone` (`TEXT NOT NULL`): the IANA zone where the meal was eaten. When a draft omits it, the server
+  uses the user's timezone (not UTC). A `consumed_at` without an offset is wall time in this zone.
+- `local_date` (`TEXT NOT NULL`, `YYYY-MM-DD`): the date of `consumed_at` in `capture_timezone`. It is the single day
+  key for nutrition: `nutrition_daily_totals`, `list_nutrition` date filters, nutrition goal progress, and the
+  nutrition section of `report` all group by it.

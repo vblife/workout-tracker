@@ -27,9 +27,9 @@ SET_ITEM={"type":"object","properties":{
   "required":["exercise"],"additionalProperties":False}
 SEG={"type":"object","properties":{"kind":{"type":"string","enum":["work","rest"]},"seconds":{"type":"integer","minimum":1,"maximum":3600},"exercise":{"type":"string"}},"required":["kind","seconds"],"additionalProperties":False}
 TOOLS=[
- {"name":"get_context","title":"Get workout context","description":"Settings and recent workout facts. Setup is optional and repeatable: never block logging, planning, reports, or coaching because a preference is missing.",
+ {"name":"get_context","title":"Get workout context","description":"Settings and recent workout facts. Setup is optional and repeatable: never block logging, planning, reports, or coaching because a preference is missing. timezone_missing=true means settings.timezone is unset and day boundaries use the host's local zone: ask the user once for their IANA timezone and save it with update_settings.",
   "inputSchema":O({"days":{"type":"integer","minimum":1,"maximum":365,"default":14}}),"annotations":{"readOnlyHint":True}},
- {"name":"update_settings","title":"Update settings","description":"Repeatable setup: update only keys the user explicitly supplied. Supports units, timezone, schedule, goals, equipment, constraints, reminder toggles, nutrition preference, and structured HIIT defaults. Never reset omitted keys.",
+ {"name":"update_settings","title":"Update settings","description":"Repeatable setup: update only keys the user explicitly supplied. Supports units, timezone (IANA name, e.g. America/New_York), schedule, goals, equipment, constraints, reminder toggles, nutrition preference, and structured HIIT defaults. Never reset omitted keys.",
   "inputSchema":O({"settings":{"type":"object","additionalProperties":True}},["settings"])},
  {"name":"resolve_exercise","title":"Resolve exercise names","description":"Map names/aliases (Chinese or English) to canonical exercises. status: matched (exact|fuzzy) / ambiguous (candidates) / not_found.",
   "inputSchema":O({"names":{"type":"array","items":{"type":"string"},"minItems":1}},["names"]),"annotations":{"readOnlyHint":True}},
@@ -40,14 +40,14 @@ TOOLS=[
     "muscle_groups":{"type":"array","items":{"type":"string"}},"equipment":{"type":"string"},"is_bodyweight":{"type":"boolean"},
     "tracking":{"type":"string","enum":["reps_weight","reps","duration","distance"]},"aliases":{"type":"array","items":{"type":"string"}}},["canonical","category"])},
  {"name":"log_sets","title":"Log sets","description":"Store one or more sets parsed from the user's message. Atomic: if any exercise is unknown/ambiguous nothing is saved and status=needs_confirmation with candidates. A first log starts a workout; more than 15 minutes of inactivity closes it. Returns e1RM (Epley) and PR flags.",
-  "inputSchema":O({"sets":{"type":"array","items":SET_ITEM,"minItems":1},"performed_at":{"type":"string","description":"ISO time; a naive value uses the configured timezone. Default now"},"notes":{"type":"string"},
+  "inputSchema":O({"sets":{"type":"array","items":SET_ITEM,"minItems":1},"performed_at":{"type":"string","description":"ISO time; a value with no offset is user-local (settings.timezone). Default now"},"notes":{"type":"string"},
     "session_weight":{"type":"number","exclusiveMinimum":0},"weight_unit":{"type":"string","enum":["lb","kg"]},"planned_duration_min":{"type":"number","exclusiveMinimum":0}},["sets"])},
  {"name":"list_recent","title":"List recent sets","description":"Most recent sets, newest first (set_id usable with delete_set).",
   "inputSchema":O({"limit":{"type":"integer","minimum":1,"maximum":100,"default":10},"exercise":{"type":"string"}}),"annotations":{"readOnlyHint":True}},
  {"name":"delete_set","title":"Delete / undo set","description":"Delete a set by set_id, or the most recently logged set if set_id omitted (undo). Removes the session if it becomes empty.",
   "inputSchema":O({"set_id":{"type":"integer"}}),"annotations":{"destructiveHint":True}},
  {"name":"update_set","title":"Correct set","description":"Correct one logged set and recalculate its workout estimate.","inputSchema":O({"set_id":{"type":"integer"},"exercise":{"type":"string"},"reps":{"type":"integer","minimum":1},"weight":{"type":"number","minimum":0},"unit":{"type":"string","enum":["lb","kg"]},"duration_s":{"type":"integer","minimum":1},"distance_m":{"type":"number","minimum":0},"rpe":{"type":"number","minimum":1,"maximum":10},"is_warmup":{"type":"boolean"}},("set_id",))},
- {"name":"query_stats","title":"Query stats","description":"Time series grouped by day/week (Monday start)/month in the user's configured timezone. metric: e1rm|volume|frequency|best_set|reps. Dates YYYY-MM-DD inclusive.",
+ {"name":"query_stats","title":"Query stats","description":"Time series grouped by day/week (Monday start)/month in the user-local timezone. metric: e1rm|volume|frequency|best_set|reps. Dates YYYY-MM-DD inclusive.",
   "inputSchema":O({"metric":{"type":"string","enum":["e1rm","volume","frequency","best_set","reps"]},"exercise":{"type":"string"},"from_date":{"type":"string"},"to_date":{"type":"string"},
     "group_by":{"type":"string","enum":["day","week","month"],"default":"week"}},["metric"]),"annotations":{"readOnlyHint":True}},
  {"name":"hiit_timer","title":"HIIT Timer","description":"Show an interactive HIIT interval timer. Each round runs the segments in order (final rest of last round skipped). Pass routine_id to time a saved hiit routine. Completion is logged automatically via log_hiit from the UI.",
@@ -62,7 +62,7 @@ TOOLS=[
  {"name":"log_activity","title":"Log hike / cardio","description":"Log a whole cardio session or hike (not individual sets). Distance defaults to mi/ft when unit=lb, km/m when kg.",
   "inputSchema":O({"type":{"type":"string","enum":["hike","run","walk","cycle","swim","row","cardio","other"]},"duration_min":{"type":"number","exclusiveMinimum":0},
     "distance":{"type":"number","minimum":0},"distance_unit":{"type":"string","enum":["km","mi"]},"elevation_gain":{"type":"number","minimum":0},"elevation_unit":{"type":"string","enum":["m","ft"]},
-    "performed_at":{"type":"string"},"rpe":{"type":"number","minimum":1,"maximum":10},"title":{"type":"string"},"notes":{"type":"string"},"session_item_id":{"type":"integer"},
+    "performed_at":{"type":"string","description":"ISO time; a value with no offset is user-local (settings.timezone). Default now"},"rpe":{"type":"number","minimum":1,"maximum":10},"title":{"type":"string"},"notes":{"type":"string"},"session_item_id":{"type":"integer"},
     "session_weight":{"type":"number","exclusiveMinimum":0},"weight_unit":{"type":"string","enum":["lb","kg"]}},["type","duration_min"])},
  {"name":"update_activity","title":"Correct cardio / hike","description":"Correct an actual cardio or hike workout and recalculate its calorie estimate.","inputSchema":O({"session_id":{"type":"integer"},"duration_min":{"type":"number","exclusiveMinimum":0},"distance":{"type":"number","minimum":0},"distance_unit":{"type":"string","enum":["km","mi"]},"elevation_gain":{"type":"number","minimum":0},"elevation_unit":{"type":"string","enum":["m","ft"]},"rpe":{"type":"number","minimum":1,"maximum":10},"title":{"type":"string"},"notes":{"type":"string"}},("session_id","duration_min"))},
  {"name":"delete_session","title":"Delete session","description":"Delete a whole session (and its sets) by session_id.","inputSchema":O({"session_id":{"type":"integer"}},["session_id"]),"annotations":{"destructiveHint":True}},
@@ -89,7 +89,7 @@ ROUTINE_TYPE={"type":"string","enum":["standard","hiit"]}
 ROUTINE_ROUNDS={"routine_type":{**ROUTINE_TYPE,"description":"hiit routines can be timed with hiit_timer(routine_id); default standard"},
   "rounds":{"type":"integer","minimum":1,"maximum":100,"description":"hiit only: circuit repeats (default 1 pass)"},
   "round_options":{"type":"array","items":{"type":"integer","minimum":1,"maximum":100},"description":"hiit only: 2-6 round counts offered by the HTML timer's round selector; [] clears"}}
-NUTRIENT_PROPS={"consumed_at":{"type":"string"},"capture_timezone":{"type":"string"},"calories_kcal":{"type":["number","null"],"minimum":0},
+NUTRIENT_PROPS={"consumed_at":{"type":"string","description":"ISO time; a value with no offset is user-local. Default now"},"capture_timezone":{"type":"string","description":"IANA zone where the meal was eaten; default the user's timezone setting. Sets local_date"},"calories_kcal":{"type":["number","null"],"minimum":0},
   "protein_g":{"type":["number","null"],"minimum":0},"carbohydrates_g":{"type":["number","null"],"minimum":0},"fat_g":{"type":["number","null"],"minimum":0},
   "fiber_g":{"type":["number","null"],"minimum":0},"saturated_fat_g":{"type":["number","null"],"minimum":0},"sugar_g":{"type":["number","null"],"minimum":0},
   "sodium_mg":{"type":["number","null"],"minimum":0},"estimation_method":{"type":"string","enum":["usda_hybrid","model_only"]},
@@ -102,9 +102,9 @@ TOOLS.extend([
  {"name":"list_goals","title":"List goals","description":"List active or historical goals.","inputSchema":O({"include_inactive":{"type":"boolean"},"domain":{"type":"string","enum":["workout","nutrition"]}}),"annotations":{"readOnlyHint":True}},
  {"name":"delete_goal","title":"Deactivate goal","description":"Deactivate one goal after the user requests it.","inputSchema":O({"goal_id":{"type":"integer"}},("goal_id",)),"annotations":{"destructiveHint":True}},
  {"name":"goal_progress","title":"Goal progress","description":"Calculate current progress from authoritative workout and nutrition records.","inputSchema":O({"goal_id":{"type":"integer"},"anchor_date":{"type":"string"}},("goal_id",)),"annotations":{"readOnlyHint":True}},
- {"name":"add_body_weight","title":"Record body weight","description":"Record optional body weight for trend and calorie estimation.","inputSchema":O({"value":{"type":"number","exclusiveMinimum":0},"unit":{"type":"string","enum":["lb","kg"]},"measured_at":{"type":"string"}},("value","unit"))},
+ {"name":"add_body_weight","title":"Record body weight","description":"Record optional body weight for trend and calorie estimation.","inputSchema":O({"value":{"type":"number","exclusiveMinimum":0},"unit":{"type":"string","enum":["lb","kg"]},"measured_at":{"type":"string","description":"ISO time; a value with no offset is user-local. Default now"}},("value","unit"))},
  {"name":"list_body_weight","title":"List body weight","description":"List optional body-weight entries.","inputSchema":O({"limit":{"type":"integer","minimum":1,"maximum":1000}}),"annotations":{"readOnlyHint":True}},
- {"name":"update_body_weight","title":"Correct body weight","description":"Correct one body-weight entry and recalculate affected calorie estimates.","inputSchema":O({"weight_id":{"type":"integer"},"value":{"type":"number","exclusiveMinimum":0},"unit":{"type":"string","enum":["lb","kg"]},"measured_at":{"type":"string"}},("weight_id","value","unit"))},
+ {"name":"update_body_weight","title":"Correct body weight","description":"Correct one body-weight entry and recalculate affected calorie estimates.","inputSchema":O({"weight_id":{"type":"integer"},"value":{"type":"number","exclusiveMinimum":0},"unit":{"type":"string","enum":["lb","kg"]},"measured_at":{"type":"string","description":"ISO time; a value with no offset is user-local"}},("weight_id","value","unit"))},
  {"name":"delete_body_weight","title":"Delete body weight","description":"Delete one body-weight entry and recalculate affected calorie estimates.","inputSchema":O({"weight_id":{"type":"integer"}},("weight_id",)),"annotations":{"destructiveHint":True}},
  {"name":"create_routine","title":"Create workout routine","description":"Create a reusable routine directly or from a completed workout the user explicitly asked to save. The source workout is unchanged.","inputSchema":O({"name":{"type":"string"},"description":{"type":"string"},"estimated_duration_min":{"type":"number","exclusiveMinimum":0},"source_session_id":{"type":"integer"},"items":{"type":"array","items":HIIT_ROUTINE_ITEM,"minItems":1},**ROUTINE_ROUNDS},("name",))},
  {"name":"list_routines","title":"List routines","description":"List reusable workout routines, optionally only one routine_type.","inputSchema":O({"include_archived":{"type":"boolean"},"routine_type":ROUTINE_TYPE}),"annotations":{"readOnlyHint":True}},
@@ -202,7 +202,7 @@ def call_tool(c,name,a):
   if name=="abandon_workout": return workouts.abandon_workout(c)
   if name=="nutrition_status": return nutrition.nutrition_status(c)
   if name=="search_usda": return nutrition.search_usda(**a)
-  if name=="validate_nutrition": return nutrition.validate_draft(a["draft"])
+  if name=="validate_nutrition": return nutrition.validate_draft(a["draft"],core.user_timezone_name(c))
   if name=="save_nutrition": return nutrition.save_entry(c,a["draft"],a.get("confirmed",False))
   if name=="list_nutrition": return nutrition.list_entries(c,**a)
   if name=="update_nutrition": return nutrition.update_entry(c,a["entry_id"],a["draft"],a.get("confirmed",False))

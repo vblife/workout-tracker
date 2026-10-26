@@ -43,7 +43,11 @@ evals/              the single workout-evals Promptfoo suite
 
 ## Scheduled routines
 
-The template provisions only a daily plan at 07:00 local, a workout reminder at 17:00 on preferred training days, a daily report at about 20:30 local, and a weekly report Sunday at 21:00. Both reports build a wide Grok Bot Page dashboard (the daily one compares today with yesterday, the weekly one compares with the prior week) and send a short text summary plus the Page link. Routines are proactive by default after schedule setup, and users may disable or edit them. Monthly and annual reports remain available on demand.
+The template provisions only a daily plan at 07:07 user-local, a workout reminder at 17:03 user-local on preferred training days, a daily report at about 20:30 user-local, and a weekly report Sunday at 21:00 user-local. Schedules in `bot/routines.yaml` are plain 5-field cron in user-local time with no `CRON_TZ=` prefix; the bot confirms and saves the user's IANA timezone (`settings.timezone`) before creating them. Both reports build a wide Grok Bot Page dashboard (the daily one compares today with yesterday, the weekly one compares with the prior week) and send a short text summary plus the Page link. Routines are proactive by default after schedule setup, and users may disable or edit them. Monthly and annual reports remain available on demand.
+
+## Timezone
+
+Every day boundary (logs, reports, goals, nutrition daily totals, daily plans) uses the user-local timezone in `settings.timezone`. There is no silent Pacific or UTC fallback. When the setting is unset, the server keeps working on the host's local zone and returns `timezone_missing: true` (with `timezone` and `timezone_source: "system"`) from `get_context`, `report`, and `daily_plan_context`, so the bot asks the user once and saves the answer with `update_settings`. Timestamps sent without a zone or offset are treated as user-local. Nutrition entries default `capture_timezone` to the user's timezone, and their `local_date` is the day key shared by daily totals, nutrition goals, and reports.
 
 ## Privacy boundary
 

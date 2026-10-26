@@ -6,7 +6,7 @@ description: Use when the user reports completed strength, bodyweight, cardio, h
 
 Log completed work promptly; never log proposed work or something the user says they did not do.
 
-- Strength or timed sets: call `log_sets` with the user's exercise wording, reps, count, weight/unit, duration, distance, RPE, and exact timestamp when supplied. The server automatically starts an implicit workout and keeps entries at or within 15 minutes together.
+- Strength or timed sets: call `log_sets` with the user's exercise wording, reps, count, weight/unit, duration, distance, RPE, and exact timestamp when supplied (a timestamp without an offset is user-local). The server automatically starts an implicit workout and keeps entries at or within 15 minutes together.
 - Whole cardio or hikes: call `log_activity`. Do not demand body weight or duration solely for calories; return the tool's estimate, label its confidence, and disclose its fallback assumptions.
 - Unknown or ambiguous exercise: show candidates and ask what the user means. Call `add_alias` or `add_exercise` only after confirmation, then retry.
 - Confirm successful logs from returned values. Mention a PR only when the server marks it.

@@ -7,7 +7,6 @@ import db as dbm
 import workouts,calories
 
 LB=0.45359237
-TZ=ZoneInfo("America/Los_Angeles")
 AUTO_FUZZY=0.85
 SETTING_KEYS={"unit":str,"days_per_week":int,"goals":list,"preferred_days":list,"session_minutes":int,
   "experience":str,"equipment":list,"timezone":str,"bodyweight":float,"injuries":str,"constraints":str,
@@ -18,19 +17,47 @@ ONBOARDING_REQUIRED=()
 
 class UserError(Exception): pass
 
-def _parse_time(s,tz=TZ):
+def _parse_time(s,tz):
+  """Parse an ISO timestamp to UTC. A value with no zone/offset is user-local wall time in tz."""
   if not s: return datetime.now(timezone.utc).replace(microsecond=0)
   d=datetime.fromisoformat(s.replace("Z","+00:00"))
-  if d.tzinfo is None: d=d.replace(tzinfo=tz)   # naive = configured local time
+  if d.tzinfo is None: d=d.replace(tzinfo=tz)   # no zone = user-local time
   return d.astimezone(timezone.utc)
 def _iso(d): return d.astimezone(timezone.utc).isoformat().replace("+00:00","Z")
-def _local(s,tz=TZ): return datetime.fromisoformat(s.replace("Z","+00:00")).astimezone(tz)
+def _local(s,tz): return _parse_time(s,tz).astimezone(tz)
 def _round(x,n=1): return None if x is None else round(x,n)
 
 # ---------- settings ----------
 def get_settings(c):
   return {r["key"]:json.loads(r["value"]) for r in c.execute("SELECT key,value FROM settings")}
-def user_timezone(c): return ZoneInfo(get_settings(c).get("timezone","America/Los_Angeles"))
+def _system_timezone_name():
+  """IANA name of the host's local zone, used only while settings.timezone is unset (and flagged)."""
+  env=(os.environ.get("TZ") or "").lstrip(":")
+  if env:
+    try: ZoneInfo(env); return env
+    except Exception: pass
+  try:
+    real=os.path.realpath("/etc/localtime")
+    if "zoneinfo/" in real:
+      name=real.split("zoneinfo/",1)[1]; ZoneInfo(name); return name
+  except Exception: pass
+  try:
+    name=open("/etc/timezone").read().strip(); ZoneInfo(name); return name
+  except Exception: pass
+  off=datetime.now().astimezone().utcoffset() or timedelta(0)
+  hours=round(off.total_seconds()/3600)
+  return "UTC" if hours==0 else f"Etc/GMT{-hours:+d}"   # POSIX sign: Etc/GMT+7 is UTC-7
+def timezone_status(c,settings=None):
+  """The one source of the user's timezone. Never assumes Pacific: when settings.timezone is unset the host's
+  local zone is used for day boundaries and timezone_missing is True so the bot can ask once."""
+  s=get_settings(c) if settings is None else settings
+  name=s.get("timezone")
+  if name:
+    try: ZoneInfo(name); return {"timezone":name,"timezone_source":"settings","timezone_missing":False}
+    except Exception: pass
+  return {"timezone":_system_timezone_name(),"timezone_source":"system","timezone_missing":True}
+def user_timezone_name(c,settings=None): return timezone_status(c,settings)["timezone"]
+def user_timezone(c,settings=None): return ZoneInfo(user_timezone_name(c,settings))
 def display_unit(c): return get_settings(c).get("unit","lb")
 def to_unit(kg,unit): return None if kg is None else _round(kg/LB if unit=="lb" else kg,1)
 
@@ -250,7 +277,7 @@ def query_stats(c,metric,exercise=None,from_date=None,to_date=None,group_by="wee
 
 # ---------- context ----------
 def get_context(c,days=14):
-  s=get_settings(c); unit=s.get("unit","lb"); tz=ZoneInfo(s.get("timezone","America/Los_Angeles"))
+  s=get_settings(c); unit=s.get("unit","lb"); tzs=timezone_status(c,s); tz=ZoneInfo(tzs["timezone"])
   since=_iso(datetime.now(timezone.utc)-timedelta(days=int(days)))
   sess=[]
   for r in c.execute("SELECT * FROM sessions WHERE started_at>=? ORDER BY started_at DESC",(since,)):
@@ -265,7 +292,7 @@ def get_context(c,days=14):
     for m in json.loads(r["muscle_groups"] or "[]"): muscles[m]=muscles.get(m,0)+r["n"]
   weight=c.execute("SELECT measured_at,input_value,input_unit,weight_kg FROM body_weight ORDER BY measured_at DESC,id DESC LIMIT 1").fetchone()
   latest_weight=None if not weight else dict(weight)
-  return {"today_local":today.isoformat(),"settings":s,"onboarding_required":[k for k in ONBOARDING_REQUIRED if k not in s],
+  return {"today_local":today.isoformat(),**tzs,"settings":s,"onboarding_required":[k for k in ONBOARDING_REQUIRED if k not in s],
     "latest_body_weight":latest_weight,"nutrition_setup":{"usda_available":bool(os.environ.get("USDA_FDC_API_KEY")),"model_only_acknowledged":bool(s.get("model_only_acknowledged",False))},
     "unit":unit,"window_days":int(days),"days_trained_this_week":days_this_week,"target_days_per_week":s.get("days_per_week"),
     "recent_sessions":sess,"sets_by_muscle":dict(sorted(muscles.items(),key=lambda kv:-kv[1])),

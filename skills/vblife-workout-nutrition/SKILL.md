@@ -10,7 +10,7 @@ Call `nutrition_status`. If no USDA key or remembered decision exists, briefly e
 
 Show likely foods/portions, nutrient totals, method, confidence, and important uncertainties. Ask for explicit confirmation. Do not call `save_nutrition` before the user confirms. Corrections create a revised draft and require confirmation again.
 
-After confirmation, call `save_nutrition` with `confirmed: true` and a nutrient-only draft: timestamp, calories, protein, carbohydrates, fat, fiber, saturated fat, sugar, sodium, method, confidence, USDA contribution, estimator version, component count, and generic uncertainty flags. Never pass or persist food names, descriptions, portions, images, search queries, responses, or FDC identifiers.
+After confirmation, call `save_nutrition` with `confirmed: true` and a nutrient-only draft: timestamp (a value without an offset is user-local; omit `capture_timezone` to use the user's timezone setting), calories, protein, carbohydrates, fat, fiber, saturated fat, sugar, sodium, method, confidence, USDA contribution, estimator version, component count, and generic uncertainty flags. Never pass or persist food names, descriptions, portions, images, search queries, responses, or FDC identifiers.
 
 ## Nutrition goals
 
@@ -28,7 +28,7 @@ Use this when a user asks for help setting daily nutrition goals. It is repeatab
 6. **Present the result.** Show `calories_kcal`, `protein_g` and `protein_g_range`, `fiber_g`, `saturated_fat_g_max`, `sodium_mg_max`, the `assumptions`, the `basis`, and the `notice` that this is an educational estimate. The tool gives no sugar value; offer a sugar maximum only if the user wants one and chooses the number.
 7. **Adjustments the user asks for.** When the user states a constraint (for example high LDL cholesterol or a kidney or creatinine concern), you may offer common adjustments as options. Examples: saturated fat at or below about 6% of calories instead of the generic 10%, protein toward the lower end of the range, or fiber of at least 30 g. Present them as user-requested adjustments, not medical advice. Show the resulting numbers and suggest confirming them with their clinician. Do not raise or lower a target on your own.
 8. **Confirm the full set.** List every goal to save with its metric, semantics, value or range, and unit. Ask for explicit confirmation. Save nothing until the user agrees.
-9. **Save each metric once with `create_goal`.** Use `domain: "nutrition"`, `period: "day"`, `effective_start_date` set to today's local date (YYYY-MM-DD), and `recommendation_version` set to the returned `version`. If a goal for that metric is already active, use `update_goal` on it instead of creating a second one.
+9. **Save each metric once with `create_goal`.** Use `domain: "nutrition"`, `period: "day"`, `effective_start_date` set to today's user-local date (YYYY-MM-DD), and `recommendation_version` set to the returned `version`. If a goal for that metric is already active, use `update_goal` on it instead of creating a second one.
 
    | Metric | Semantics | Unit | Source |
    |---|---|---|---|
@@ -40,6 +40,6 @@ Use this when a user asks for help setting daily nutrition goals. It is repeatab
    | `sugar_g` | `maximum` | `g` | user-chosen only |
 
    Use `lower_value` and `upper_value` for `range` and `target_value` for the others. Use `origin: "recommended"` for a value saved unchanged from the tool and `origin: "user"` for anything the user set or adjusted. Put the inputs and any adjustment reason in `assumptions` as short strings, for example `["age 40", "weight_kg 90", "objective fat_loss", "user-requested: saturated fat about 6% of calories"]`. `carbohydrates_g` and `fat_g` goals are also accepted when the user asks for them.
-10. **Confirm and offer a daily check.** Report what was saved. Then offer an optional evening nutrition check at a time the user picks. Create it as a scheduled routine only if they accept; it is not one of the default routines. Suggested prompt: "Call `list_goals` with domain nutrition and `goal_progress` for each active goal with anchor_date set to today's local date, plus `nutrition_daily_totals` for today. Send a short summary of each goal (met, not yet met, or over the limit) and what is left. Treat nutrients missing from logs as unknown, not zero. Do not log anything."
+10. **Confirm and offer a daily check.** Report what was saved. Then offer an optional evening nutrition check at a time the user picks. Create it as a scheduled routine only if they accept, as a plain 5-field cron in user-local time with no `CRON_TZ=` prefix; it is not one of the default routines. Suggested prompt: "Call `list_goals` with domain nutrition and `goal_progress` for each active goal with anchor_date set to today's user-local date, plus `nutrition_daily_totals` for today. Send a short summary of each goal (met, not yet met, or over the limit) and what is left. Treat nutrients missing from logs as unknown, not zero. Do not log anything."
 
 `nutrition_status` reports USDA estimation mode, not goal progress; use `goal_progress` and `nutrition_daily_totals` for comparisons.

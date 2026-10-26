@@ -94,7 +94,7 @@ def _lift_progress(rows,unit,a,b,tz,n=6):
     last_day=_local(rs[-1]["performed_at"],tz).date(); ls=[r for r in rs if _local(r["performed_at"],tz).date()==last_day]
     e0=max(r["e1rm_kg"] for r in fs); e1=max(r["e1rm_kg"] for r in ls); best=max(rs,key=lambda r:r["e1rm_kg"])
     # plateau: no e1RM improvement over the last 4 weeks of data vs before
-    cut=_iso(_parse_time(rs[-1]["performed_at"])-timedelta(days=28))
+    cut=_iso(_parse_time(rs[-1]["performed_at"],tz)-timedelta(days=28))
     before=[r["e1rm_kg"] for r in rs if r["performed_at"]<cut]; recent=[r["e1rm_kg"] for r in rs if r["performed_at"]>=cut]
     plateau=bool(before and recent and max(recent)<=max(before)+1e-9)
     out.append({"exercise":name,"sets":len(rs),"e1rm_start":to_unit(e0,unit),"e1rm_end":to_unit(e1,unit),"e1rm_change_pct":round(100*(e1-e0)/e0,1) if e0 else None,
@@ -131,8 +131,9 @@ def _trend(c,period,anchor,unit,tz):
   return {"group_by":group,"points":points}
 
 def _nutrition(c,period,a,b,tz):
-  rows=c.execute("SELECT * FROM nutrition_entries WHERE consumed_at>=? AND consumed_at<? ORDER BY consumed_at",(U(a,tz),U(b,tz))).fetchall()
-  local_day=lambda r:_local(r["consumed_at"],tz).date().isoformat()
+  # Group by the entry's stored local_date, the same day key as nutrition_daily_totals and nutrition goals.
+  rows=c.execute("SELECT * FROM nutrition_entries WHERE local_date>=? AND local_date<? ORDER BY consumed_at",(a.isoformat(),b.isoformat())).fetchall()
+  local_day=lambda r:r["local_date"]
   out={"entries":len(rows),"days_with_entries":len({local_day(r) for r in rows})}
   for field in ("calories_kcal","protein_g","carbohydrates_g","fat_g","fiber_g","saturated_fat_g","sugar_g","sodium_mg"):
     values=[r[field] for r in rows if r[field] is not None]
@@ -144,7 +145,7 @@ def _nutrition(c,period,a,b,tz):
 
 def report(c,period="week",anchor_date=None,now=None):
   if period not in PERIODS: raise UserError("period must be day|week|month|quarter|year|all")
-  unit=display_unit(c); s=get_settings(c); tz=user_timezone(c); target=s.get("days_per_week") or 4
+  unit=display_unit(c); s=get_settings(c); tzs=core.timezone_status(c,s); tz=user_timezone(c,s); target=s.get("days_per_week") or 4
   now=now or datetime.now(timezone.utc); anchor=date.fromisoformat(anchor_date) if anchor_date else now.astimezone(tz).date()
   workouts.reconcile_active(c,now)
   rows=_all_sets(c); sessions=c.execute("SELECT * FROM sessions WHERE status='completed' ORDER BY started_at").fetchall()
@@ -154,7 +155,7 @@ def report(c,period="week",anchor_date=None,now=None):
   else: a,b=period_bounds(period,anchor); pa,pb=prev_bounds(period,a)
   cur=_summ(c,rows,sessions,unit,a,b,tz); days=cur.pop("_days")
   out={"period":period,"label":label(period,a,b),"start":a.isoformat(),"end_exclusive":b.isoformat(),"unit":unit,
-       "distance_unit":"mi" if unit=="lb" else "km","elevation_unit":"ft" if unit=="lb" else "m","target_days_per_week":target,"summary":cur}
+       "distance_unit":"mi" if unit=="lb" else "km","elevation_unit":"ft" if unit=="lb" else "m","target_days_per_week":target,**tzs,"summary":cur}
   out["active_workout"]=workouts.get_active(c,now)["active_workout"]
   out["nutrition"]=_nutrition(c,period,a,b,tz)
   out["trend_series"]=_trend(c,period,anchor,unit,tz)
