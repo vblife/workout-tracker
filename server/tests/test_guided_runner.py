@@ -156,7 +156,7 @@ class GuidedRoutineTimerToolTest(DbCase):
         for step in work(out["steps"]):
             self.assertEqual(step["session_item_id"], mapping[step["routine_item_id"]])
         self.assertEqual(kinds(out["steps"]), ["work", ("rest", 120), "work", ("rest", 120), "work"])
-        self.assertIn("log_sets", out["completion_handoff"]["rule"])
+        self.assertIn("log_guided_result", out["completion_handoff"]["rule"])
         again = routines.guided_routine_timer(self.c, self.std["routine_id"], idempotency_key="g1")
         self.assertEqual((again["status"], again["session_id"]), ("already_started", out["session_id"]))
 
@@ -257,7 +257,7 @@ class GuidedRendererTest(unittest.TestCase):
         html = r.render(GUIDED, template())
         cfg = injected(html)
         self.assertEqual(cfg["mode"], "guided")
-        for needle in ('id="doneBtn"', 'id="summary"', 'id="list"', 'id="forBot"', 'cfg.mode==="guided"',
+        for needle in ('id="doneBtn"', 'id="sendBtn"', 'id="list"', 'GUIDED_MARK', 'cfg.mode==="guided"',
                        '<button id="start" type="button">Start</button>'):
             self.assertIn(needle, html)
         self.assertNotIn("fetch(", html)

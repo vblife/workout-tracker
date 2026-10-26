@@ -102,7 +102,9 @@ class GuidedUiResourceTest(ServerCase):
         self.assertNotIn("_meta", tools["guided_routine_timer"])
         res = self.call(s, "guided_routine_timer", {"routine_id": self.routine(s)})
         self.assertNotIn("_meta", res)
-        self.assertNotIn("ui_auto_log", res["structuredContent"])
+        sc = res["structuredContent"]
+        self.assertEqual((sc["ui_auto_log"], sc["delivery"]), (False, "offline_page"))  # explicit, never implied
+        self.assertIn("io.modelcontextprotocol/ui", sc["delivery_reason"])
         self.assertIn("render_timer_html.py", res["content"][0]["text"])
         self.assertIn("Offline fallback only", res["structuredContent"]["completion_handoff"]["applies_to"])
 

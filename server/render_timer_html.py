@@ -239,6 +239,11 @@ def normalize_config(config):
         config = {}
     if not isinstance(config, dict):
         raise ValueError("timer config must be a JSON object")
+    if config.get("ui_auto_log") is True:
+        # The guided result says the attached MCP Apps runner logs every Done set itself. An offline copy would log
+        # nothing and could double-log if both were used, so never drop to the offline page for it.
+        raise ValueError("this guided run has ui_auto_log true: the attached MCP Apps runner logs each Done set; "
+                         "do not render an offline page for it")
     out = {
         "label": _label(config.get("label") or config.get("name") or DEFAULTS["label"]),
         "ready_s": parse_seconds(config.get("ready_s", DEFAULTS["ready_s"]), "ready_s", minimum=0, maximum=60),

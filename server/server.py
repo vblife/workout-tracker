@@ -115,10 +115,13 @@ TOOLS.extend([
  {"name":"archive_routine","title":"Archive routine","description":"Archive a routine without breaking historical workout links.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",)),"annotations":{"destructiveHint":True}},
  {"name":"restore_routine","title":"Restore routine","description":"Restore an archived routine.","inputSchema":O({"routine_id":{"type":"integer"}},("routine_id",))},
  {"name":"start_routine","title":"Start routine","description":"Start a saved routine by creating an independent active-workout snapshot. Never replace an existing active workout.","inputSchema":O({"routine_id":{"type":"integer"},"idempotency_key":{"type":"string"}},("routine_id",))},
- {"name":"guided_routine_timer","title":"Guided routine runner","description":"Start a saved standard routine (same rules as start_routine: never replaces an active workout) and run it set by set: each set is a work step (count-up with Done, or a countdown when the item has target_duration_s) followed by a rest countdown (item rest_seconds, else default_rest_s), no rest after the last step. MCP Apps clients (result has ui_auto_log=true): the attached runner logs each set the moment the user marks it Done (log_sets with performed_at) and calls finish_workout when the user ends or completes the routine, so do not render a page, ask for a summary, or log those sets again. Other clients: render the steps with server/render_timer_html.py --config and log only the sets the user marks Done, using completion_handoff. HIIT routines are rejected: use hiit_timer.",
+ {"name":"guided_routine_timer","title":"Guided routine runner","description":"Start a saved standard routine (same rules as start_routine: never replaces an active workout) and run it set by set: each set is a work step (count-up with Done, or a countdown when the item has target_duration_s) followed by a rest countdown (item rest_seconds, else default_rest_s), no rest after the last step. MCP Apps clients (result has ui_auto_log=true): the attached runner logs each set the moment the user marks it Done (log_sets with performed_at) and calls finish_workout when the user ends or completes the routine, so do not render a page, ask for a summary, or log those sets again. Other clients (ui_auto_log=false, delivery offline_page): render the steps with server/render_timer_html.py --config; the page keeps Done sets on the device and its Send to Workout Bot button sends the result (a line starting WORKOUT_BOT_GUIDED); save it with one log_guided_result call, never set by set (see completion_handoff). HIIT routines are rejected: use hiit_timer.",
   "inputSchema":O({"routine_id":{"type":"integer"},"lang":{"type":"string","enum":["en","zh"],"default":"en","description":"Exercise-name and UI language for the runner page"},
     "default_rest_s":{"type":"integer","minimum":0,"maximum":3600,"default":90,"description":"Rest after a working set when the item has no rest_seconds"},"idempotency_key":{"type":"string"}},("routine_id",)),
   "_meta":_uimeta(GUIDED_URI,"Starting guided workout…","Guided runner ready")},
+ {"name":"log_guided_result","title":"Save guided runner result","description":"Save the offline guided runner's result in one call: every Done set (backdated to its done_at) into the runner's own workout, then finish it. Call it as soon as a message carries the runner result (a line starting WORKOUT_BOT_GUIDED followed by JSON, or JSON with workout_bot guided_routine), passing that JSON's session_id, completed and ended; do not ask for confirmation, re-log sets one by one, or call finish_workout. Idempotent (sets already saved are skipped). If the workout closed while the user trained offline it is reopened for these sets; if another workout is active nothing is saved (rejected). Unknown exercises save nothing (needs_confirmation).",
+  "inputSchema":O({"session_id":{"type":"integer","minimum":1},"completed":{"type":"array","items":{"type":"object"},"description":"The runner result's completed list, unchanged"},
+    "ended":{"type":"string","enum":["finished","ended_early"],"default":"finished"},"finish":{"type":"boolean","default":True,"description":"Finish the workout after saving"}},("session_id","completed"))},
  {"name":"start_workout","title":"Start accepted plan","description":"Start an accepted conversational plan as an active snapshot; generating or showing a plan must not call this tool.","inputSchema":O({"mode":{"type":"string","enum":["conversational_plan"]},"title":{"type":"string"},"items":{"type":"array","items":SESSION_ITEM},"idempotency_key":{"type":"string"},
     "session_weight":{"type":"number","exclusiveMinimum":0},"weight_unit":{"type":"string","enum":["lb","kg"]},"planned_duration_min":{"type":"number","exclusiveMinimum":0}},("mode",))},
  {"name":"get_active_workout","title":"Resume active workout","description":"Return the one active workout, completed work, and pending items.","inputSchema":O({}),"annotations":{"readOnlyHint":True}},
@@ -161,7 +164,8 @@ def _summary(name,r,ui=False):
   if name=="guided_routine_timer":
     head=f"Guided runner ready for workout #{r['session_id']} ({r['status']}): {r['work_sets']} sets from '{r['name']}'."
     if ui: return head+" The runner is attached: it logs each set when the user taps Done and finishes the workout when they end it. Do not render an offline page, ask for a summary, or log these sets again."
-    return head+" Render it with render_timer_html.py --config."
+    return head+" Offline page (this client did not negotiate MCP Apps, so nothing auto-logs): render it with render_timer_html.py --config. When the user sends the runner result (WORKOUT_BOT_GUIDED line), save it with one log_guided_result call."
+  if name=="log_guided_result": return r.get("note")
   if name=="finish_workout" and r.get("status")=="already_finished": return r["note"]
   return None
 def call_tool(c,name,a):
@@ -204,6 +208,7 @@ def call_tool(c,name,a):
   if name=="restore_routine": return routines.set_archived(c,a["routine_id"],False)
   if name=="start_routine": return routines.start_routine(c,**a)
   if name=="guided_routine_timer": return routines.guided_routine_timer(c,**a)
+  if name=="log_guided_result": return routines.log_guided_result(c,**a)
   if name=="start_workout": return workouts.start_workout(c,**a)
   if name=="get_active_workout": return workouts.get_active(c)
   if name=="add_workout_item": return workouts.add_session_item(c,a["item"])
@@ -226,7 +231,7 @@ def call_tool(c,name,a):
   raise KeyError(f"unknown tool: {name}")
 
 class Server:
-  def __init__(s,db_path=None): s.c=dbm.connect(db_path); s.ui_supported=False
+  def __init__(s,db_path=None): s.c=dbm.connect(db_path); s.ui_supported=False; s.client=None
   def handle(s,m):
     meth=m.get("method"); p=m.get("params") or {}
     workouts.reconcile_active(s.c)
@@ -234,6 +239,9 @@ class Server:
       pv=p.get("protocolVersion")
       cc=p.get("capabilities") or {}; ext=cc.get("extensions") or cc.get("experimental") or {}
       s.ui_supported="io.modelcontextprotocol/ui" in ext
+      s.client=(p.get("clientInfo") or {}).get("name") or "unknown"
+      # Diagnostics (stderr only): whether this client gets the auto-logging MCP Apps runner or the offline page.
+      print(f"workout-bot: client {s.client!r} MCP Apps {'negotiated' if s.ui_supported else 'not offered (guided runner falls back to the offline page)'}",file=sys.stderr,flush=True)
       caps={"tools":{"listChanged":False}}
       if s.ui_supported: caps.update({"resources":{"listChanged":False},"extensions":{"io.modelcontextprotocol/ui":{"mimeTypes":[MIME]}}})
       return {"protocolVersion":pv if pv in("2024-11-05","2025-03-26","2025-06-18","2025-11-25") else "2025-06-18",
@@ -261,7 +269,10 @@ class Server:
       except (UserError,TypeError,ValueError) as e:
         s.c.rollback(); return {"content":[{"type":"text","text":f"Error: {e}"}],"isError":True}
       ui=s.ui_supported and name in TOOL_UI
-      if ui and name=="guided_routine_timer": r={**r,"ui_auto_log":True}
+      if name=="guided_routine_timer" and isinstance(r,dict):
+        # Always explicit, so the bot never guesses: True only when the attached MCP Apps runner logs each Done set.
+        r={**r,"ui_auto_log":bool(ui),"delivery":"mcp_apps" if ui else "offline_page"}
+        if not ui: r["delivery_reason"]="client did not negotiate the io.modelcontextprotocol/ui extension at initialize"
       txt=_summary(name,r,ui)
       body=json.dumps(r,ensure_ascii=False)
       out={"content":[{"type":"text","text":(txt+"\n"+body) if txt else body}],"structuredContent":r}

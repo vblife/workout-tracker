@@ -77,20 +77,30 @@ preview that starts no workout (`--default-rest SECONDS` changes the 90 s defaul
   rest only when they set `rest_seconds` themselves. There is no rest after the final step.
 - **Clock.** A work step counts down only when the item has `target_duration_s` (it beeps short, short, long and
   counts as done when it reaches 0). Every other work step counts up from 0:00 until the green **Done** button
-  (same size as the other timer buttons) is tapped. Rests count down and move on by themselves; **Next** ends a rest early. **Skip set** skips the set
+  (same size as the other timer buttons) is tapped. Rests count down and move on by themselves; **Next set** (zh: 下一组) ends a rest early; the up-next line also reads "Next set: …". **Skip set** skips the set
   and its rest. **Pause** freezes the clock. **End workout** needs a second tap within 4 s.
 - **Finish.** The finish screen lists only the sets marked Done (or holds that reached 0), with "N/M sets done",
-  and a JSON summary (`<pre id="summary">` and `body[data-guided-summary]`):
+  and the result as JSON in `body[data-guided-summary]` (not shown on the page; there is no text for the bot on
+  the page):
   `{"workout_bot": "guided_routine", "session_id", "routine_id", "ended": "finished" | "ended_early",
   "completed_sets", "total_sets", "completed": [{exercise, set_index, reps, weight, unit, duration_s,
   distance_m, is_warmup, loggable, session_item_id, elapsed_s, done_at, ...}]}`. For a timed hold, `duration_s`
   is the seconds actually held (capped at the target); for an untimed step with no reps or distance it is the
   elapsed time.
-- **Logging (offline page, fallback).** The rendered file makes no network calls. `guided_routine_timer`
-  already started the workout (`start_routine`); the bot then calls `log_sets` only for the completed entries,
-  one call per set in order with `performed_at = done_at` and the entry's `session_item_id` (see
-  `completion_handoff`), and `finish_workout`. Backdating matters because an active workout closes after 15
-  minutes without logged activity.
+- **Logging (offline page, fallback).** Used when the result has `ui_auto_log: false` and
+  `delivery: "offline_page"` (the client did not negotiate MCP Apps; `delivery_reason` says so). The rendered
+  file makes no network calls. It saves its progress in `localStorage` under `workout-bot-guided:<session_id>`
+  (Done entries, current step, ended), so a reload or reopen shows the finish screen again, or resumes paused at
+  the saved step. The finish screen has one **Send to Workout Bot** button: it sends a short line plus
+  `WORKOUT_BOT_GUIDED {"workout_bot","session_id","routine_id","ended","completed":[...]}` through
+  `navigator.share`, falling back to the clipboard and then to a selectable text box. The bot passes that JSON to
+  `log_guided_result(session_id, completed, ended)`, which in one atomic call logs each Done set with
+  `performed_at = done_at` and its `session_item_id`, marks `loggable: false` items completed, skips sets
+  already saved (same exercise, item and time), and finishes the workout. Because an offline run logs nothing
+  until the end, the 15-minute idle rule has usually closed the workout (abandoned, items skipped) by then;
+  `log_guided_result` reopens that routine workout for the sets and finishes it again, unless another workout
+  is active (`rejected`, nothing saved). `render_timer_html.py` refuses a config with `ui_auto_log: true`, so an
+  auto-logging run never drops to the offline page.
 - **Logging (MCP Apps, primary).** When the client negotiates the `io.modelcontextprotocol/ui` extension,
   `guided_routine_timer` carries `_meta.ui.resourceUri = ui://workout/guided.html`, which serves this same
   template, and its result gains `ui_auto_log: true`. The view gets its config from
@@ -107,8 +117,14 @@ preview that starts no workout (`--default-rest SECONDS` changes the 90 s defaul
   even when nothing was marked Done. If that workout already ended (for example it closed after 15 minutes
   idle and another workout became active from chat), `finish_workout` changes nothing and returns
   `status: "already_finished"` with a `note`, so End never finishes an unrelated workout. Skipped and unreached sets are never logged. If a set still could not be saved, `finish_workout` is not
-  called and the page falls back to the offline summary with the unlogged steps (`auto_log` in the JSON) so the
-  bot can log them. Without the bridge (the rendered file, or a host without MCP Apps) nothing is sent.
+  called and the page shows the Send to Workout Bot button (`auto_log` in the JSON lists the unlogged steps)
+  so the bot can save them with `log_guided_result`. Without the bridge (the rendered file, or a host without MCP Apps) nothing is sent.
+- **Which path (diagnosing a fallback).** The server picks the path once, at `initialize`: auto-log needs the
+  host to declare `io.modelcontextprotocol/ui` in `capabilities.extensions` (or `capabilities.experimental`).
+  It writes one stderr line per connection naming the client and whether MCP Apps was negotiated. A host that
+  does not declare the extension gets `ui_auto_log: false` and the offline page; forcing the view on such a host
+  would log nothing, so the server does not. The stdio server loads its code at start: after pulling a change,
+  restart the MCP server process, or the host keeps talking to the old code.
 - **Cache.** `session_id` and the per-step `session_item_id`s (stored as a top-level `session_item_ids` list)
   are per-run fields like `hiit_id`: they are left out of the cache key and patched into the out file, so
   starting the same routine again reuses the cached page.
