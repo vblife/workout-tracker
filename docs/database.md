@@ -79,3 +79,11 @@ user's confirmed daily maintenance energy (TDEE) in kcal, validated to 800–100
 `local_date`, and target deficit = `maintenance_kcal` minus the user's active daily `calories_kcal` goal with
 `maximum` semantics. Workout `estimated_calories` are never part of this calculation. Fields are `null` when the
 setting, the intake, or the maximum goal is missing.
+
+For multi-day periods `energy_balance.total_energy_deficit_kcal` is the sum of the daily deficits on days with
+confirmed intake (alongside `avg_daily_energy_deficit_kcal`); a day report keeps `energy_deficit_kcal` only.
+`trend_series` points for week, month, quarter, year, and all add `training_days` (the primary training trend,
+`trend_series.primary_training_metric`), `total_energy_deficit_kcal`, `avg_daily_energy_deficit_kcal`, and
+`days_with_intake`. A week report also returns `trend_series.day_points`: one entry per day of the week with `trained`,
+`sessions`, `intake_kcal`, and `energy_deficit_kcal`. `training_minutes` stays on trend points for backward
+compatibility. The day report's 28-day trend has no training-day or deficit fields.

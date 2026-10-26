@@ -94,6 +94,59 @@ class EnergyDeficitTest(unittest.TestCase):
             self.assertEqual(eb["days_within_calorie_max"], 2, period)
             self.assertEqual([d["energy_deficit_kcal"] for d in eb["days"]], [570, 370, 520])
 
+    def test_period_total_energy_deficit(self):
+        core.update_settings(self.c, {"maintenance_kcal": 2370})
+        self._calorie_max(1900)
+        for day, kcal in (("2026-10-19", 1800), ("2026-10-20", 2000), ("2026-10-21", 1850), ("2026-09-30", 2570)):
+            self._eat(day, kcal)
+        week = reports.report(self.c, "week", anchor_date="2026-10-21", now=NOW)["energy_balance"]
+        self.assertEqual(week["total_energy_deficit_kcal"], 570 + 370 + 520)
+        month = reports.report(self.c, "month", anchor_date="2026-10-21", now=NOW)["energy_balance"]
+        self.assertEqual(month["total_energy_deficit_kcal"], 570 + 370 + 520)
+        year = reports.report(self.c, "year", anchor_date="2026-10-21", now=NOW)["energy_balance"]
+        self.assertEqual(year["days_with_intake"], 4)
+        self.assertEqual(year["total_energy_deficit_kcal"], 570 + 370 + 520 - 200)  # a surplus day subtracts
+        day = reports.report(self.c, "day", anchor_date="2026-10-21", now=NOW)["energy_balance"]
+        self.assertNotIn("total_energy_deficit_kcal", day)
+        self.assertEqual(day["energy_deficit_kcal"], 520)
+        core.update_settings(self.c, {"maintenance_kcal": None})
+        week = reports.report(self.c, "week", anchor_date="2026-10-21", now=NOW)["energy_balance"]
+        self.assertIsNone(week["total_energy_deficit_kcal"])
+        self.assertFalse(week["available"])
+
+    def test_trend_series_training_days_and_energy_deficit(self):
+        core.update_settings(self.c, {"maintenance_kcal": 2370})
+        for day, kcal in (("2026-10-19", 1800), ("2026-10-21", 1850), ("2026-09-15", 2070)):
+            self._eat(day, kcal)
+        for at in ("2026-10-19T08:00:00", "2026-10-19T18:00:00", "2026-10-22T08:00:00", "2026-09-16T08:00:00"):
+            core.log_activity(self.c, "run", 30, performed_at=at)
+            workouts.finish_workout(self.c, at=at.replace(":00:00", ":30:00"))
+        week = reports.report(self.c, "week", anchor_date="2026-10-21", now=NOW)["trend_series"]
+        self.assertEqual(week["primary_training_metric"], "training_days")
+        days = week["day_points"]
+        self.assertEqual([d["date"] for d in days][0::6], ["2026-10-19", "2026-10-25"])
+        self.assertEqual([d["trained"] for d in days], [1, 0, 0, 1, 0, 0, 0])
+        self.assertEqual(days[0]["sessions"], 2)
+        self.assertEqual([d["energy_deficit_kcal"] for d in days], [570, None, 520, None, None, None, None])
+        self.assertEqual(week["group_by"], "week")
+        current = week["points"][-1]
+        self.assertEqual((current["period"], current["training_days"]), ("2026-10-19", 2))
+        self.assertEqual((current["total_energy_deficit_kcal"], current["days_with_intake"]), (1090, 2))
+        self.assertEqual(current["avg_daily_energy_deficit_kcal"], 545)
+        month = reports.report(self.c, "month", anchor_date="2026-10-21", now=NOW)["trend_series"]
+        self.assertEqual(month["primary_training_metric"], "training_days")
+        self.assertNotIn("day_points", month)
+        by = {p["period"]: p for p in month["points"]}
+        self.assertEqual((by["2026-10"]["training_days"], by["2026-10"]["total_energy_deficit_kcal"]), (2, 1090))
+        self.assertEqual((by["2026-09"]["training_days"], by["2026-09"]["total_energy_deficit_kcal"]), (1, 300))
+        self.assertEqual((by["2026-08"]["training_days"], by["2026-08"]["total_energy_deficit_kcal"]), (0, None))
+        year = reports.report(self.c, "year", anchor_date="2026-10-21", now=NOW)["trend_series"]
+        self.assertEqual(len(year["points"]), 12)
+        self.assertEqual({p["period"]: p["training_days"] for p in year["points"]}["2026-10"], 2)
+        daily = reports.report(self.c, "day", anchor_date="2026-10-21", now=NOW)["trend_series"]
+        self.assertNotIn("primary_training_metric", daily)
+        self.assertTrue(all("training_days" not in p and "total_energy_deficit_kcal" not in p for p in daily["points"]))
+
     def test_uses_each_users_own_numbers(self):
         core.update_settings(self.c, {"maintenance_kcal": 2200})
         self._calorie_max(1600)
