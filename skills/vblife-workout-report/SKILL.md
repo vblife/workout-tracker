@@ -1,6 +1,6 @@
 ---
 name: vblife-workout-report
-description: Use when the user requests a daily, weekly, monthly, quarterly, annual, or all-time workout and nutrition report, dashboard, recap, or scheduled weekly report.
+description: Use when the user requests a daily, weekly, monthly, quarterly, annual, or all-time workout and nutrition report, dashboard, recap, or scheduled daily or weekly report.
 ---
 # Reports and dashboards
 
@@ -30,9 +30,26 @@ Match the shipped weekly example titled like `Training week · <start>–<end>` 
 
 Use `show_progress` only when the user asks for a focused lift chart; that can stay an MCP Apps or chart reply and does not replace the period Page.
 
+### Daily vs weekly Pages
+
+Daily (`period=day`) and weekly (`period=week`) reports use the same Page pattern: wide `Page`, the same Overview grid, and a `Segmented` training / nutrition switch. They differ in what they compare and emphasize.
+
+| | Daily (`period=day`) | Weekly (`period=week`) |
+|---|---|---|
+| Title | `Training day · <date>` style | `Training week · <start>–<end>` style |
+| Comparison | Today vs yesterday from `vs_previous` (day-over-day) | This week vs the prior week from `vs_previous` (week-over-week) |
+| Overview | Day totals for training and nutrients | Training totals and per-day nutrient averages |
+| Trends | Recent four-week rhythm from the `report` trend points | Six weekly points for training time, strength volume, and cardio duration |
+| Goals | Distance to each daily target (how much is left, or how far over) | Goal hit rates across the week |
+| Tips | Two or three short, concrete actions for tomorrow | Two or three short actions for the coming week |
+
+Tips for both say what to do more or less of (for example more cardio minutes, one fewer hard session, more mobility) and which nutrients to eat more or less of (for example more protein, less added sugar, more fiber). Tips name nutrients and amounts only, never foods, dishes, or meals.
+
+A scheduled daily report runs in the evening, so treat the day as possibly unfinished: phrase distance to goals as what is still open today, not as a missed target.
+
 ### Nutrition privacy on the Page
 
-Same rules as `vblife-workout-nutrition`: nutrients and goals only. Never put food names, dish names, portions, meal descriptions, images, USDA queries, FDC ids, or raw meal text on the Page, in chart labels, or in chat.
+Same rules as `vblife-workout-nutrition`: nutrients and goals only. Never put food names, dish names, portions, meal descriptions, images, USDA queries, FDC ids, or raw meal text on the Page, in chart labels, in tips, or in chat. This applies equally to daily and weekly Pages.
 
 ### Page copy language
 
@@ -62,6 +79,8 @@ Whether or not the Page writes cleanly, the short chat summary still covers:
 3. Confirmed nutrition totals for a day or per-day averages, recorded-day count, and goal-hit rates for longer periods; keep consumed and burned energy separate.
 4. One or two actionable recommendations.
 
-Weekly reports explain the six weekly points for training time, strength volume, and cardio duration. Monthly reports explain the same three metrics across six monthly points. Annual reports explain twelve monthly points. Daily reports cover the recent four-week rhythm.
+Weekly reports explain the six weekly points for training time, strength volume, and cardio duration, plus the change vs the prior week. Monthly reports explain the same three metrics across six monthly points. Annual reports explain twelve monthly points. Daily reports cover today vs yesterday, distance to daily goals, and the recent four-week rhythm.
 
-All numbers and units come from tool output. When data is sparse or estimates are rough, say so. Empty periods remain useful: state that no completed workouts or confirmed nutrition entries exist and suggest a next step; skip building a Page only when there is truly nothing to show, and then say so in chat.
+The chat summary is always in the user's language, stays short, and ends with the Page link. Never paste report HTML or the full Page body into chat.
+
+All numbers and units come from tool output. When data is sparse or estimates are rough, say so. Empty periods remain useful: state that no completed workouts or confirmed nutrition entries exist and suggest a next step. For an empty day, still build the Page when there is any goal progress or a previous-day comparison to show. Skip building a Page only when there is truly nothing to show, and then say so in chat.

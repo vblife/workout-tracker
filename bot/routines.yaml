@@ -2,6 +2,11 @@
 # The bot creates these itself after the user confirms timezone and training days.
 # Schedules are 5-field cron in the user's local time. {training_days} is the
 # cron day-of-week list of the user's preferred training days (e.g. 1-5).
+# Report routines share one pattern: call `report`, build a wide Grok Bot Page
+# dashboard from its JSON, and send a short chat summary plus the Page link.
+#   - Daily report: evening, about 20:30 local (flexible; move it if the user
+#     usually finishes training or eating later). Compares today vs yesterday.
+#   - Weekly report: Sunday 08:00 local. Compares this week vs the prior week.
 routines:
   - slug: workout-daily-plan
     name: Daily plan
@@ -16,11 +21,22 @@ routines:
     prompt: >-
       Check get_active_workout and today's logs. If a workout is active or today's
       workout is complete, stay quiet. Otherwise send a short reminder with today's focus.
+  - slug: workout-daily-report
+    name: Daily report
+    schedule: "30 20 * * *"
+    prompt: >-
+      Run the vblife-workout-report skill and call report with period=day and
+      anchor_date set to today's local date. Build a wide Grok Bot Page (Canvas)
+      dashboard from that JSON with the workout summary, nutrition summary,
+      comparison to the previous day, distance to daily goals, and short
+      actionable tips. Send a short text summary in the user's language plus the
+      Page link. Do not attach report HTML. Never put food names on the Page.
   - slug: workout-weekly-report
     name: Weekly report
     schedule: "0 8 * * 0"
     prompt: >-
       Run the vblife-workout-report skill and call report with period=week and
       anchor_date set to today's local date. Build a wide Grok Bot Page (Canvas)
-      dashboard from that JSON and send a short text summary plus the Page link.
-      Do not attach report HTML. Never put food names on the Page.
+      dashboard from that JSON with six-week trends and comparison to the
+      previous week, and send a short text summary in the user's language plus
+      the Page link. Do not attach report HTML. Never put food names on the Page.
