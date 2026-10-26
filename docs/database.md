@@ -85,5 +85,9 @@ confirmed intake (alongside `avg_daily_energy_deficit_kcal`); a day report keeps
 `trend_series` points for week, month, quarter, year, and all add `training_days` (the primary training trend,
 `trend_series.primary_training_metric`), `total_energy_deficit_kcal`, `avg_daily_energy_deficit_kcal`, and
 `days_with_intake`. A week report also returns `trend_series.day_points`: one entry per day of the week with `trained`,
-`sessions`, `intake_kcal`, and `energy_deficit_kcal`. `training_minutes` stays on trend points for backward
-compatibility. The day report's 28-day trend has no training-day or deficit fields.
+`sessions`, `intake_kcal`, `energy_deficit_kcal`, and that day's confirmed nutrient totals `protein_g`, `fat_g`,
+`saturated_fat_g`, `fiber_g`, `sugar_g`, and `sodium_mg`. Multi-day `trend_series.points` also carry `intake_kcal`,
+`protein_g`, `fat_g`, `saturated_fat_g`, `fiber_g`, `sugar_g`, and `sodium_mg` as daily averages over the days in the
+bucket that logged each nutrient (the same rule as `nutrition.*_daily_average`). Nutrient fields are `null` when nothing
+was logged for that nutrient; carbohydrates are not part of the trend series. `training_minutes` stays on trend points
+for backward compatibility. The day report's 28-day trend has no training-day, deficit, or nutrient fields.

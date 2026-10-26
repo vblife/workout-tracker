@@ -22,7 +22,7 @@ args: [/home/vblife/workout/server/server.py, --stdio]
 - Completed workouts can become reusable routines on request. Start, resume, add, replace, reorder, skip, finish, or abandon items in a routine snapshot without changing its source routine. Misgrouped entries can be moved or adjacent completed workouts merged with confirmation.
 - Body weight is optional. Workout calories always remain estimates with confidence and assumptions.
 - Meal photos are analyzed in conversation. Saving requires confirmation and writes only nutrients, timestamp, and estimation metadata to `workout.db`.
-- Reports support day, week, month, quarter, year, and all time, including six-week, six-month, and twelve-month trends of training days and energy deficit as applicable.
+- Reports support day, week, month, quarter, year, and all time, including six-week, six-month, and twelve-month trends of training days, energy deficit, and core nutrient daily averages as applicable.
 
 ## MCP Apps
 
