@@ -16,7 +16,7 @@ After the Page is written, send one short text summary in the user's language pl
 
 ### Page shape (UX pattern)
 
-Match the shipped weekly example titled like `Training week · <start>–<end>` (wide dashboard with Segmented training / nutrition views). Adapt the same layout to other periods:
+Match the shipped weekly example titled like `Training & Nutrition Week · <start>–<end>` (wide dashboard with Segmented training / nutrition views). Adapt the same layout to other periods:
 
 1. `Page` with `width="wide"`, a period title, and a one- or two-sentence `summary` of the main takeaway.
 2. Optional `TableOfContents` when there are about six or more sections.
@@ -36,7 +36,7 @@ Daily (`period=day`) and weekly (`period=week`) reports use the same Page patter
 
 | | Daily (`period=day`) | Weekly (`period=week`) |
 |---|---|---|
-| Title | `Training day · <date>` style | `Training week · <start>–<end>` style |
+| Title | `Training & Nutrition Day · <date>` style | `Training & Nutrition Week · <start>–<end>` style |
 | Comparison | Today vs yesterday from `vs_previous` (day-over-day) | This week vs the prior week from `vs_previous` (week-over-week) |
 | Overview | Day totals for training and nutrients | Training totals and per-day nutrient averages |
 | Trends | Recent four-week rhythm from the `report` trend points | Six weekly points for training time, strength volume, and cardio duration |
