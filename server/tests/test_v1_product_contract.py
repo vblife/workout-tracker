@@ -46,7 +46,7 @@ class ProductContractTest(unittest.TestCase):
         self.assertIn("create_routine", combined)
         self.assertIn("query_stats", combined)
 
-    def test_agent_contract_and_only_three_scheduled_routines(self):
+    def test_agent_contract_and_only_four_scheduled_routines(self):
         text = read("bot/instructions.md")
         self.assertIn("Workout Bot", text)
         self.assertIn("workout-bot", text)
@@ -55,13 +55,22 @@ class ProductContractTest(unittest.TestCase):
         self.assertNotIn("Scheduled Grok Bot routines", text)
         routines = read("bot/routines.yaml")
         names = re.findall(r"(?m)^    name: (.+)$", routines)
-        self.assertEqual(names, ["Daily plan", "Workout reminder", "Weekly report"])
+        self.assertEqual(names, ["Daily plan", "Workout reminder", "Daily report", "Weekly report"])
+        daily = routines.split("  - slug: workout-daily-report\n", 1)[1].split("  - slug:", 1)[0]
+        self.assertIn('schedule: "30 20 * * *"', daily)
+        self.assertIn("period=day", daily)
+        self.assertIn("anchor_date", daily)
+        self.assertIn("previous day", daily)
+        self.assertIn("page", daily.lower())
+        self.assertIn("text summary", daily.lower())
+        self.assertIn("food names", daily)
         weekly = routines.split("  - slug: workout-weekly-report\n", 1)[1]
         self.assertIn('schedule: "0 8 * * 0"', weekly)
         self.assertIn("period=week", weekly)
         self.assertIn("anchor_date", weekly)
         self.assertIn("dashboard", weekly.lower())
         self.assertIn("text summary", weekly.lower())
+        self.assertIn("previous week", weekly)
         self.assertNotIn("Charles", text)
         self.assertNotIn("/home/box/workout", text)
         self.assertNotIn("fallback_url", text)
