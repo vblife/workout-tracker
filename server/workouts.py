@@ -265,10 +265,12 @@ def start_workout(c, *, mode, title=None, items=None, source_routine_id=None, id
     return {"status": "started", **_session(c, sid)}
 
 
-def session_for_log(c, at, workout_type, session_weight_kg=None, planned_duration_min=None):
+def session_for_log(c, at, workout_type, session_weight_kg=None, planned_duration_min=None, session_id=None):
     at = _dt(at)
     reconcile_active(c, at)
     row = c.execute("SELECT id,type,started_at,last_activity_at FROM sessions WHERE status='in_progress'").fetchone()
+    if session_id is not None and (not row or row["id"] != session_id or at < _dt(row["started_at"])):
+        raise _error(f"workout #{session_id} is not the active workout")  # log_target_rejection runs first
     # A backfilled entry predating the active workout cannot belong to it. Close
     # the newer workout at its own last activity, then create an independent one.
     if row and at < _dt(row["started_at"]):
@@ -287,6 +289,32 @@ def session_for_log(c, at, workout_type, session_weight_kg=None, planned_duratio
         planned_duration_min=coalesce(?,planned_duration_min) WHERE id=?""",
         (combined, _iso(at), session_weight_kg, planned_duration_min, sid))
     return sid, created
+
+
+def log_target_rejection(c, session_id, at):
+    """Guard for log_sets(session_id=...): return None when sets logged at `at` would land in that workout (it is
+    the active one and `at` is not before its start), else a rejection result. Nothing is written for a
+    rejection: the sets are never redirected into another active workout and no new workout is started."""
+    if isinstance(session_id, bool) or not isinstance(session_id, int) or session_id < 1:
+        raise _error("session_id must be a positive integer")
+    at = _dt(at)
+    reconcile_active(c, at)
+    row = c.execute("SELECT id,started_at FROM sessions WHERE status='in_progress'").fetchone()
+    active_id = row["id"] if row else None
+    if active_id == session_id and at >= _dt(row["started_at"]):
+        return None
+    workout = c.execute("SELECT status FROM sessions WHERE id=?", (session_id,)).fetchone()
+    if active_id == session_id:
+        reason, why = "before_session_start", "performed_at is before that workout started"
+    elif not workout:
+        reason, why = "session_not_found", "that workout does not exist"
+    else:
+        reason, why = "session_not_active", f"that workout is no longer active ({workout['status']})"
+    note = (f"Nothing saved: these sets were for workout #{session_id}, but {why}"
+            + (f"; workout #{active_id} is active and was left unchanged." if active_id not in (None, session_id) else ".")
+            + " The sets were not logged to any other workout.")
+    return {"status": "rejected", "reason": reason, "logged": [], "session_id": session_id,
+            "session_status": workout["status"] if workout else None, "active_session_id": active_id, "note": note}
 
 
 def touch(c, session_id, at):

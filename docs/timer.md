@@ -97,7 +97,10 @@ preview that starts no workout (`--default-rest SECONDS` changes the 90 s defaul
   `ui/notifications/tool-result` and talks to the host over the MCP Apps postMessage bridge (`ui/initialize`,
   `tools/call`, `ui/update-model-context`, `ui/notifications/size-changed`, `ui/resource-teardown`), like the
   HIIT widget. Each Done set (or timed hold reaching 0) is logged at once with one `log_sets` call
-  (`performed_at = done_at`, `session_item_id`); a `loggable: false` step with a session item is marked
+  (`performed_at = done_at`, `session_item_id`, and the runner's `session_id`). If that workout is no longer
+  the active one (it closed after 15 minutes idle, was finished or abandoned, or another workout became
+  active), `log_sets` saves nothing and returns `status: "rejected"` with a `reason` and `note`; the set is
+  never written into the other workout, and the page counts it as not saved. A `loggable: false` step with a session item is marked
   completed with `set_workout_item_status`. Calls run one at a time in order, once per step. On End workout or
   the natural finish the page waits for pending calls, retries a failed call once (never a timed-out one,
   which may have been saved), and then calls `finish_workout` with the runner's `session_id`, without asking,
