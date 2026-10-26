@@ -108,7 +108,7 @@ class TimerConfigTest(unittest.TestCase):
     def test_defaults(self):
         cfg = r.normalize_config({})
         self.assertEqual(cfg["label"], "Timer")
-        self.assertEqual(cfg["ready_s"], 5)
+        self.assertEqual(cfg["ready_s"], 0)  # no get-ready period by default
         self.assertEqual(cfg["intervals"], [{"kind": "interval", "seconds": 60, "label": None, "round": 0}])
         self.assertEqual(cfg["total_s"], 60)
         self.assertNotIn("strings", cfg)
@@ -497,6 +497,38 @@ def _timeline(segs):
         s["end"] = t
     return segs
 
+
+class TimerReadyDefaultTest(unittest.TestCase):
+    """No get-ready period by default on any timer; ready_s / --ready (0-60) stays optional."""
+
+    def test_template_and_generator_default_to_zero(self):
+        self.assertIn("ready_s:0,", template())
+        self.assertEqual(r.DEFAULTS["ready_s"], 0)
+        self.assertEqual(r.normalize_config({"duration_s": 120})["ready_s"], 0)
+        self.assertEqual(r.normalize_config({"rounds": 2, "segments": [{"kind": "work", "seconds": 40}]})["ready_s"], 0)
+        guided = {"mode": "guided", "steps": [{"kind": "work", "exercise": "Squat", "reps": 5}]}
+        self.assertEqual(r.normalize_config(guided)["ready_s"], 0)
+        self.assertEqual(r.normalize_config({**guided, "ready_s": 10})["ready_s"], 10)
+
+    def test_cli_default_and_ready_flag(self):
+        script = r.__file__
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "t.html")
+            subprocess.run([sys.executable, script, out, "--duration", "1:00", "--label", "One minute"], check=True)
+            with open(out, encoding="utf-8") as f:
+                self.assertEqual(json.loads(injected(f.read()))["ready_s"], 0)
+            subprocess.run([sys.executable, script, out, "--duration", "1:00", "--label", "One minute", "--ready", "5"], check=True)
+            with open(out, encoding="utf-8") as f:
+                self.assertEqual(json.loads(injected(f.read()))["ready_s"], 5)
+        help_text = subprocess.run([sys.executable, script, "--help"], check=True, capture_output=True, text=True).stdout
+        self.assertIn("default 0", help_text)
+
+    def test_hiit_widget_has_no_default_get_ready(self):
+        with open(os.path.join(os.path.dirname(r.__file__), "ui", "hiit.html"), encoding="utf-8") as f:
+            widget = f.read()
+        self.assertNotIn("countdown=3", widget)
+        self.assertIn("ready_s:0}", widget)
+        self.assertIn("countdown=readyS()", widget)
 
 class TimerTickTest(unittest.TestCase):
     CUES = ("/* cue-schedule:begin", "/* cue-schedule:end */")

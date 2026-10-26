@@ -56,7 +56,7 @@ var STRINGS={
   setDone:"\u5b8c\u6210",setOf:"\u7b2c {i}/{n} \u7ec4",repsN:"{n} \u6b21",hold:"\u4fdd\u6301 {t}",skipSet:"\u8df3\u8fc7\u672c\u7ec4",end:"\u7ed3\u675f\u8bad\u7ec3",endConfirm:"\u518d\u70b9\u4e00\u6b21\u7ed3\u675f",finished:"\u8bad\u7ec3\u5b8c\u6210",stopped:"\u8bad\u7ec3\u5df2\u63d0\u524d\u7ed3\u675f",completedN:"\u5df2\u5b8c\u6210 {n}/{m} \u7ec4",setsN:"\u5171 {n} \u7ec4",noneDone:"\u6ca1\u6709\u6807\u8bb0\u5b8c\u6210\u7684\u7ec4",tellBot:"\u8bf7\u544a\u8bc9 Workout Bot \u4f60\u5df2\u7ec3\u5b8c\uff0c\u4ee5\u4fbf\u53ea\u8bb0\u5f55\u6807\u8bb0\u5b8c\u6210\u7684\u7ec4",forBot:"\u7ed9 Workout Bot \u7684\u8bb0\u5f55"}
 };
 var KINDS={work:1,rest:1,warmup:1,cooldown:1,interval:1};
-var DEF={label:"Timer",duration_s:60,ready_s:5,lang:"en",sound:true,speech:false,vibrate:true,keep_awake:true,tick:true};
+var DEF={label:"Timer",duration_s:60,ready_s:0,lang:"en",sound:true,speech:false,vibrate:true,keep_awake:true,tick:true};
 var HORIZON=1200,MAX_INTERVALS=2000,MAX_TOTAL=86400;
 var $=function(i){return document.getElementById(i)};
 function fmt(s){s=Math.max(0,Math.ceil(s-1e-6));var h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return(h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0")}
@@ -111,7 +111,7 @@ function buildCues(segs){var cues=[],i,j;
  return cues}
 /* Soft clock tick once per second while counting, like a second hand. Ticks sit on whole seconds from the
    start of each counting interval and are skipped within 0.5 s of any cue beep, so they never collide with
-   short, short, long. No ticks in the get-ready period: it is short and already ends with its own cue. */
+   short, short, long. No ticks in the optional get-ready period (ready_s, default 0): it already ends with its own cue. */
 function buildTicks(segs,cues){var out=[],ct=cues.map(function(c){return c.t}).sort(function(a,b){return a-b}),p=0,i,k,t;
  for(i=0;i<segs.length;i++){var s=segs[i];if(s.ready)continue;
   for(k=1;s.start+k<s.end-1e-6;k++){t=s.start+k;while(p<ct.length&&ct[p]<t-0.5)p++;if(p<ct.length&&Math.abs(ct[p]-t)<0.5)continue;out.push(t)}}
